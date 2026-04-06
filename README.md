@@ -128,6 +128,14 @@ Run backend and frontend manually if you are not using the VPS installer.
 4. Run migrations from `backend/`: `alembic upgrade head`.
 5. Start API from `backend/`: `uvicorn app.main:app --reload`.
 
+## Testing
+Run backend smoke tests with pytest:
+
+```bash
+cd backend
+python -m pytest -q
+```
+
 ## Frontend (Dashboard)
 1. Change directory to `frontend/`.
 2. Install dependencies: `npm install`.

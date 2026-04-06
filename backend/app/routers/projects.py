@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -96,10 +96,11 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_project(project_id: int, db: Session = Depends(get_db)) -> None:
+def delete_project(project_id: int, db: Session = Depends(get_db)) -> Response:
     project = _get_project_or_404(db, project_id)
     db.delete(project)
     db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{project_id}/logs", response_model=list[LogOut])

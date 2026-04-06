@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ProjectCreate(BaseModel):
@@ -36,6 +36,8 @@ class ProjectUpdate(BaseModel):
 
 
 class ProjectOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     service_type: Literal["web", "worker"]
     name: str
@@ -50,20 +52,15 @@ class ProjectOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
-
-
 class LogOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     project_id: int
     level: str
     source: str
     message: str
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class NginxApplyRequest(BaseModel):

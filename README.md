@@ -1,6 +1,6 @@
-# Deployer
+# StackDeployer
 
-Deployer is a self-hosted control plane for deploying multiple projects (FastAPI, Node.js, mixed stacks) on a single VPS.
+StackDeployer is a self-hosted control plane for deploying multiple projects (FastAPI, Node.js, mixed stacks) on a single VPS.
 
 ## Current Backend Capabilities
 - Project CRUD API
@@ -32,11 +32,11 @@ sudo bash install.sh
 
 The installer will:
 - Check/install Python 3.10+, Node.js 18+, Nginx, Certbot, PM2
-- Copy backend files to `/opt/deployer/backend`
+- Copy backend files to `/opt/stackdeployer/backend`
 - Create venv and install dependencies
 - Create backend `.env` with generated JWT secret
 - Run `alembic upgrade head`
-- Create and start `deployer.service` (systemd)
+- Create and start `stackdeployer.service` (systemd)
 
 ## Security Notes
 - Keep backend bound to `127.0.0.1` and expose only via Nginx.

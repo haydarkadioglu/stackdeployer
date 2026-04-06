@@ -10,7 +10,7 @@ import {
 } from "./services/api";
 import { createProjectLogsSocket } from "./services/ws";
 
-const TOKEN_KEY = "deployer_token";
+const TOKEN_KEY = "stackdeployer_token";
 
 function formatWhen(value) {
   if (!value) {
@@ -249,7 +249,7 @@ export default function App() {
     return (
       <div className="auth-shell">
         <form className="auth-card" onSubmit={handleLogin}>
-          <h1>Deployer</h1>
+          <h1>StackDeployer</h1>
           <p>Control plane girisi</p>
           <label htmlFor="username">username</label>
           <input

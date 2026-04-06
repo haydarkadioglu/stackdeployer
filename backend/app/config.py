@@ -2,9 +2,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    app_name: str = "Deployer Control Plane"
+    app_name: str = "StackDeployer Control Plane"
     app_env: str = "development"
-    database_url: str = "sqlite:///./deployer.db"
+    database_url: str = "sqlite:///./stackdeployer.db"
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60

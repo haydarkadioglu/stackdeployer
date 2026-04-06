@@ -31,6 +31,6 @@ def on_startup() -> None:
 def health() -> dict[str, str]:
     return {
         "status": "ok",
-        "service": "deployer-control-plane",
+        "service": "stackdeployer-control-plane",
         "environment": settings.app_env,
     }

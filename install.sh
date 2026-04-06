@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_ROOT="${APP_ROOT:-/opt/deployer}"
+APP_ROOT="${APP_ROOT:-/opt/stackdeployer}"
 APP_PORT="${APP_PORT:-8001}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_SRC_DIR="${SCRIPT_DIR}/backend"
 BACKEND_DST_DIR="${APP_ROOT}/backend"
-SERVICE_NAME="deployer"
+SERVICE_NAME="stackdeployer"
 
 log() {
-  echo "[deployer-install] $*"
+  echo "[stackdeployer-install] $*"
 }
 
 ensure_linux() {
@@ -162,7 +162,7 @@ write_env_file() {
   log "Creating backend .env"
   $SUDO tee "$env_file" >/dev/null <<EOF
 app_env=production
-database_url=sqlite:///${BACKEND_DST_DIR}/deployer.db
+database_url=sqlite:///${BACKEND_DST_DIR}/stackdeployer.db
 jwt_secret=${jwt_secret}
 jwt_algorithm=HS256
 jwt_access_token_expire_minutes=60
@@ -182,7 +182,7 @@ write_systemd_service() {
   log "Writing systemd service: ${SERVICE_NAME}"
   $SUDO tee "$service_file" >/dev/null <<EOF
 [Unit]
-Description=Deployer FastAPI Control Plane
+Description=StackDeployer FastAPI Control Plane
 After=network.target
 
 [Service]

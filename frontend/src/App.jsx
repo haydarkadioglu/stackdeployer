@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  createProject,
   deployProject,
   getMe,
   getProjectLogs,
@@ -89,6 +90,18 @@ export default function App() {
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [wsConnected, setWsConnected] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [newProject, setNewProject] = useState({
+    service_type: "web",
+    name: "",
+    git_url: "",
+    local_path: "",
+    internal_port: "",
+    tech_stack: "node",
+    start_command: "",
+    build_command: "",
+    domain: "",
+  });
 
   const summary = useMemo(() => {
     const total = projects.length || 1;
@@ -245,6 +258,59 @@ export default function App() {
     }
   }
 
+  function updateNewProjectField(key, value) {
+    setNewProject((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleCreateProject(event) {
+    event.preventDefault();
+
+    try {
+      setError("");
+      setCreatingProject(true);
+
+      const payload = {
+        service_type: newProject.service_type,
+        name: newProject.name.trim(),
+        git_url: newProject.git_url.trim(),
+        local_path: newProject.local_path.trim(),
+        tech_stack: newProject.tech_stack.trim(),
+        build_command: newProject.build_command.trim() || null,
+        start_command: newProject.start_command.trim() || null,
+        domain: newProject.domain.trim() || null,
+        internal_port:
+          newProject.service_type === "web" && newProject.internal_port
+            ? Number(newProject.internal_port)
+            : null,
+      };
+
+      if (newProject.service_type === "worker") {
+        payload.domain = null;
+      }
+
+      const created = await createProject(token, payload);
+      await refreshProjects();
+      if (created) {
+        setActiveProject(created);
+      }
+
+      setNewProject((prev) => ({
+        ...prev,
+        name: "",
+        git_url: "",
+        local_path: "",
+        internal_port: "",
+        start_command: "",
+        build_command: "",
+        domain: "",
+      }));
+    } catch (err) {
+      setError(err.message || "Project creation failed");
+    } finally {
+      setCreatingProject(false);
+    }
+  }
+
   if (!token) {
     return (
       <div className="auth-shell">
@@ -332,6 +398,69 @@ export default function App() {
           </section>
 
           <section className="project-section">
+            <h2>CREATE PROJECT</h2>
+            <form className="project-form" onSubmit={handleCreateProject}>
+              <select
+                value={newProject.service_type}
+                onChange={(event) => updateNewProjectField("service_type", event.target.value)}
+              >
+                <option value="web">web service</option>
+                <option value="worker">worker service</option>
+              </select>
+              <input
+                placeholder="name"
+                value={newProject.name}
+                onChange={(event) => updateNewProjectField("name", event.target.value)}
+                required
+              />
+              <input
+                placeholder="git url"
+                value={newProject.git_url}
+                onChange={(event) => updateNewProjectField("git_url", event.target.value)}
+                required
+              />
+              <input
+                placeholder="local path (example: /srv/apps/myapp)"
+                value={newProject.local_path}
+                onChange={(event) => updateNewProjectField("local_path", event.target.value)}
+                required
+              />
+              <input
+                placeholder="tech stack (node/python/other)"
+                value={newProject.tech_stack}
+                onChange={(event) => updateNewProjectField("tech_stack", event.target.value)}
+                required
+              />
+              <input
+                placeholder="start command (example: npm start)"
+                value={newProject.start_command}
+                onChange={(event) => updateNewProjectField("start_command", event.target.value)}
+              />
+              <input
+                placeholder="build command (optional)"
+                value={newProject.build_command}
+                onChange={(event) => updateNewProjectField("build_command", event.target.value)}
+              />
+              <input
+                placeholder={newProject.service_type === "web" ? "internal port (required)" : "internal port (optional)"}
+                type="number"
+                min="1"
+                max="65535"
+                value={newProject.internal_port}
+                onChange={(event) => updateNewProjectField("internal_port", event.target.value)}
+                required={newProject.service_type === "web"}
+              />
+              <input
+                placeholder="domain (web only)"
+                value={newProject.domain}
+                onChange={(event) => updateNewProjectField("domain", event.target.value)}
+                disabled={newProject.service_type === "worker"}
+              />
+              <button type="submit" className="auth-btn" disabled={creatingProject}>
+                {creatingProject ? "creating..." : "create project"}
+              </button>
+            </form>
+
             <h2>PROJECTS ({projects.length})</h2>
             <div className="project-list">
               {projects.map((project) => (

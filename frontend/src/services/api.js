@@ -1,4 +1,24 @@
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+const LOCAL_DEV_API_BASE_URL = "http://127.0.0.1:8001";
+
+function resolveApiBaseUrl() {
+  const configured = import.meta.env.VITE_API_BASE_URL;
+  if (configured) {
+    return configured;
+  }
+
+  if (typeof window === "undefined") {
+    return LOCAL_DEV_API_BASE_URL;
+  }
+
+  const origin = window.location.origin;
+  if (origin.includes(":5173")) {
+    return LOCAL_DEV_API_BASE_URL;
+  }
+
+  return origin;
+}
+
+const API_BASE_URL = resolveApiBaseUrl().replace(/\/$/, "");
 
 async function request(path, { method = "GET", token, body } = {}) {
   const headers = {
@@ -47,6 +67,14 @@ export async function getMe(token) {
 
 export async function listProjects(token) {
   return request("/api/v1/projects", { token });
+}
+
+export async function createProject(token, payload) {
+  return request("/api/v1/projects", {
+    method: "POST",
+    token,
+    body: payload,
+  });
 }
 
 export async function getProjectLogs(token, projectId, limit = 200) {

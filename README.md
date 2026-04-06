@@ -16,10 +16,10 @@ cd stackdeployer
 
 ### 2. Bring up StackDeployer on a VPS (recommended)
 1. Use Ubuntu or Debian with a sudo-enabled user.
-2. Run installer from project root:
+2. Run installer from project root (`PANEL_SERVER_NAME` can be your domain or subdomain):
 
 ```bash
-sudo bash install.sh
+sudo PANEL_SERVER_NAME=panel.example.com bash install.sh
 ```
 
 3. Check service health:
@@ -83,6 +83,17 @@ sudo certbot --nginx -d example.com -d www.example.com
 ### 7. Optional local development flow
 Run backend and frontend manually if you are not using the VPS installer.
 
+## Ready-to-Run Checklist
+1. Run migrations: `alembic upgrade head` inside `backend/`.
+2. Bootstrap first admin with `/api/v1/auth/bootstrap`.
+3. Login and verify `/api/v1/auth/me` works with your token.
+4. Create a `web` or `worker` project from dashboard form or API.
+5. For `web` projects, set `internal_port` and apply Nginx mapping.
+
+## Service Types
+- `web`: requires `internal_port`, supports domain and Nginx mapping.
+- `worker`: port/domain optional, managed via PM2 as background/console service.
+
 ## Current Backend Capabilities
 - Project CRUD API
 - Service types: `web` and `worker` (console/background processes)
@@ -105,6 +116,11 @@ Run backend and frontend manually if you are not using the VPS installer.
 3. Run development server: `npm run dev`.
 4. Open the local Vite URL shown in terminal.
 
+Notes:
+- By default, frontend calls `http://127.0.0.1:8001` in local dev (`:5173`).
+- In deployed mode, frontend uses same-origin API path (`/api/...`) via Nginx.
+- You can override with `VITE_API_BASE_URL`.
+
 ## VPS Installation (Ubuntu/Debian)
 Run:
 
@@ -115,10 +131,13 @@ sudo bash install.sh
 The installer will:
 - Check/install Python 3.10+, Node.js 18+, Nginx, Certbot, PM2
 - Copy backend files to `/opt/stackdeployer/backend`
+- Copy frontend files to `/opt/stackdeployer/frontend`
 - Create venv and install dependencies
 - Create backend `.env` with generated JWT secret
 - Run `alembic upgrade head`
+- Build frontend (`npm install && npm run build`)
 - Create and start `stackdeployer.service` (systemd)
+- Configure Nginx panel site and reload Nginx
 
 ## Security Notes
 - Keep backend bound to `127.0.0.1` and expose only via Nginx.

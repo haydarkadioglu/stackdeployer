@@ -3,9 +3,12 @@ set -euo pipefail
 
 APP_ROOT="${APP_ROOT:-/opt/stackdeployer}"
 APP_PORT="${APP_PORT:-8001}"
+PANEL_SERVER_NAME="${PANEL_SERVER_NAME:-_}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_SRC_DIR="${SCRIPT_DIR}/backend"
 BACKEND_DST_DIR="${APP_ROOT}/backend"
+FRONTEND_SRC_DIR="${SCRIPT_DIR}/frontend"
+FRONTEND_DST_DIR="${APP_ROOT}/frontend"
 SERVICE_NAME="stackdeployer"
 
 log() {
@@ -139,6 +142,17 @@ sync_backend_files() {
   $SUDO cp -a "${BACKEND_SRC_DIR}/." "$BACKEND_DST_DIR/"
 }
 
+sync_frontend_files() {
+  if [[ ! -d "$FRONTEND_SRC_DIR" ]]; then
+    log "Frontend source not found, skipping frontend setup"
+    return
+  fi
+
+  log "Syncing frontend source to ${FRONTEND_DST_DIR}"
+  $SUDO mkdir -p "$FRONTEND_DST_DIR"
+  $SUDO cp -a "${FRONTEND_SRC_DIR}/." "$FRONTEND_DST_DIR/"
+}
+
 setup_python_env() {
   log "Setting up Python virtual environment"
   if [[ ! -d "${BACKEND_DST_DIR}/.venv" ]]; then
@@ -176,6 +190,19 @@ run_migrations() {
   popd >/dev/null
 }
 
+build_frontend() {
+  if [[ ! -d "$FRONTEND_DST_DIR" || ! -f "${FRONTEND_DST_DIR}/package.json" ]]; then
+    log "Frontend package.json not found, skipping frontend build"
+    return
+  fi
+
+  log "Building frontend"
+  pushd "$FRONTEND_DST_DIR" >/dev/null
+  $SUDO npm install
+  $SUDO npm run build
+  popd >/dev/null
+}
+
 write_systemd_service() {
   local service_file="/etc/systemd/system/${SERVICE_NAME}.service"
 
@@ -202,6 +229,54 @@ EOF
   $SUDO systemctl enable --now "${SERVICE_NAME}"
 }
 
+configure_nginx_panel_site() {
+  local site_name="stackdeployer-panel"
+  local available_path="/etc/nginx/sites-available/${site_name}"
+  local enabled_path="/etc/nginx/sites-enabled/${site_name}"
+
+  if [[ ! -d "${FRONTEND_DST_DIR}/dist" ]]; then
+    log "Frontend dist not found, skipping nginx panel site setup"
+    return
+  fi
+
+  log "Configuring nginx panel site (${site_name})"
+  $SUDO tee "$available_path" >/dev/null <<EOF
+server {
+    listen 80;
+    server_name ${PANEL_SERVER_NAME};
+
+    root ${FRONTEND_DST_DIR}/dist;
+    index index.html;
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:${APP_PORT};
+        proxy_http_version 1.1;
+      proxy_set_header Host \$host;
+      proxy_set_header X-Real-IP \$remote_addr;
+      proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location /api/v1/ws/ {
+        proxy_pass http://127.0.0.1:${APP_PORT};
+        proxy_http_version 1.1;
+      proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+      proxy_set_header Host \$host;
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOF
+
+  $SUDO ln -sfn "$available_path" "$enabled_path"
+
+  $SUDO nginx -t
+  $SUDO systemctl reload nginx
+}
+
 post_install_summary() {
   cat <<EOF
 
@@ -217,6 +292,9 @@ Bootstrap first admin (run on server):
 
 Security reminder:
   Keep the API bound to localhost and expose it only via Nginx with authentication enabled.
+
+Panel URL:
+  http://${PANEL_SERVER_NAME}
 EOF
 }
 
@@ -233,10 +311,13 @@ main() {
   ensure_pm2
 
   sync_backend_files
+  sync_frontend_files
   setup_python_env
   write_env_file
   run_migrations
+  build_frontend
   write_systemd_service
+  configure_nginx_panel_site
   post_install_summary
 }
 

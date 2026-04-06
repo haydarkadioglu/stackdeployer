@@ -18,6 +18,7 @@ from ..models import Deployment, Log, Project, ProjectDomainRecord, ProjectEnvir
 from ..nginx_config import NginxConfigError, NginxManager, NginxSiteConfig
 from ..schemas import (
     CommandResultOut,
+    DeploymentRunRequest,
     DeploymentOut,
     ImportPathsOut,
     DomainPlanOut,
@@ -53,6 +54,7 @@ DEFAULT_IMPORT_BASE_PATHS = ["/srv/apps", "/opt/apps", "/home/ubuntu/apps"]
 FORBIDDEN_COMMAND_PATTERN = re.compile(r"[;&|`$><\r\n]")
 WINDOWS_DRIVE_PREFIX_PATTERN = re.compile(r"^[a-zA-Z]:")
 DOMAIN_PATTERN = re.compile(r"^(?!-)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
+BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]+$")
 
 
 def _validate_service_constraints(service_type: str, internal_port: int | None, domain: str | None) -> None:
@@ -144,6 +146,26 @@ def _next_available_port(db: Session, start_port: int = 8000) -> int:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No available port left in valid range",
+            )
+    return port
+
+
+def _next_available_preview_port(db: Session, start_port: int = 10000) -> int:
+    used_project_ports = set(
+        db.execute(select(Project.internal_port).where(Project.internal_port.is_not(None))).scalars().all()
+    )
+    used_preview_ports = set(
+        db.execute(select(Deployment.preview_port).where(Deployment.preview_port.is_not(None))).scalars().all()
+    )
+    used_ports = used_project_ports.union(used_preview_ports)
+
+    port = max(start_port, 1)
+    while port in used_ports:
+        port += 1
+        if port > 65535:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No available preview port left in valid range",
             )
     return port
 
@@ -452,12 +474,20 @@ def get_project_logs(project_id: int, limit: int = 200, db: Session = Depends(ge
 
 
 @router.get("/{project_id}/deployments", response_model=list[DeploymentOut])
-def list_project_deployments(project_id: int, limit: int = 50, db: Session = Depends(get_db)) -> list[Deployment]:
+def list_project_deployments(
+    project_id: int,
+    limit: int = 50,
+    deployment_type: str | None = None,
+    db: Session = Depends(get_db),
+) -> list[Deployment]:
     _get_project_or_404(db, project_id)
+    query = select(Deployment).where(Deployment.project_id == project_id)
+    if deployment_type in {"production", "preview"}:
+        query = query.where(Deployment.deployment_type == deployment_type)
+
     rows = (
         db.execute(
-            select(Deployment)
-            .where(Deployment.project_id == project_id)
+            query
             .order_by(Deployment.started_at.desc())
             .limit(min(max(limit, 1), 200))
         )
@@ -557,9 +587,42 @@ def delete_project_environment(project_id: int, env_id: int, db: Session = Depen
 
 
 @router.post("/{project_id}/deploy", status_code=status.HTTP_202_ACCEPTED)
-def deploy_project(project_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
+def deploy_project(
+    project_id: int,
+    payload: DeploymentRunRequest | None = None,
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
     project = _get_project_or_404(db, project_id)
-    deployment = Deployment(project_id=project.id, status="building", branch="main")
+    deploy_request = payload or DeploymentRunRequest()
+    branch = deploy_request.branch.strip()
+    if not BRANCH_PATTERN.match(branch):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid branch format")
+
+    deployment_type = deploy_request.deployment_type
+    if deployment_type == "preview":
+        in_progress_preview = db.execute(
+            select(Deployment).where(
+                Deployment.project_id == project.id,
+                Deployment.deployment_type == "preview",
+                Deployment.branch == branch,
+                Deployment.status == "building",
+            )
+        ).scalar_one_or_none()
+        if in_progress_preview:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A preview deployment for this branch is already in progress",
+            )
+
+    preview_port = _next_available_preview_port(db) if deployment_type == "preview" else None
+
+    deployment = Deployment(
+        project_id=project.id,
+        status="building",
+        branch=branch,
+        deployment_type=deployment_type,
+        preview_port=preview_port,
+    )
     db.add(deployment)
     db.commit()
     db.refresh(deployment)
@@ -567,13 +630,30 @@ def deploy_project(project_id: int, db: Session = Depends(get_db)) -> dict[str, 
     def logger(line: str) -> None:
         _create_log(db, project.id, "INFO", "executor", line)
 
+    target_dir = Path(project.local_path)
+    resolved_start_command = project.start_command
+    resolved_port = project.internal_port
+    if deployment_type == "preview":
+        branch_slug = _safe_slug(branch)
+        target_dir = Path(project.local_path).parent / f"{project.name}-preview-{branch_slug}"
+        if project.service_type == "web":
+            resolved_port = preview_port
+            _build_cmd, suggested_start, _framework = _suggest_commands(
+                project.local_path,
+                stack=project.tech_stack,
+                service_type=project.service_type,
+                port=resolved_port or 8000,
+            )
+            resolved_start_command = suggested_start or project.start_command
+
     plan = DeploymentPlan(
         repo_url=project.git_url,
-        target_dir=Path(project.local_path),
+        target_dir=target_dir,
         stack=project.tech_stack,
+        branch=branch,
         build_command=project.build_command,
-        start_command=project.start_command,
-        internal_port=project.internal_port,
+        start_command=resolved_start_command,
+        internal_port=resolved_port,
         service_type=project.service_type,
     )
 
@@ -601,7 +681,13 @@ def deploy_project(project_id: int, db: Session = Depends(get_db)) -> dict[str, 
         _create_log(db, project.id, "ERROR", "executor", str(exc))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    return {"status": "accepted", "message": "Deployment completed"}
+    response = {
+        "status": "accepted",
+        "message": "Deployment completed",
+    }
+    if preview_port is not None:
+        response["preview_port"] = str(preview_port)
+    return response
 
 
 @router.post("/{project_id}/start", response_model=CommandResultOut)

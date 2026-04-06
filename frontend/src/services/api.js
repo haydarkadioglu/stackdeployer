@@ -93,8 +93,12 @@ export async function getProjectLogs(token, projectId, limit = 200) {
   return request(`/api/v1/projects/${projectId}/logs?limit=${limit}`, { token });
 }
 
-export async function listProjectDeployments(token, projectId, limit = 50) {
-  return request(`/api/v1/projects/${projectId}/deployments?limit=${limit}`, { token });
+export async function listProjectDeployments(token, projectId, limit = 50, deploymentType = "all") {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (deploymentType && deploymentType !== "all") {
+    query.set("deployment_type", deploymentType);
+  }
+  return request(`/api/v1/projects/${projectId}/deployments?${query.toString()}`, { token });
 }
 
 export async function listProjectEnvironment(token, projectId, revealSecrets = false) {
@@ -148,10 +152,11 @@ export async function listImportPaths(token) {
   return request("/api/v1/projects/import/paths", { token });
 }
 
-export async function deployProject(token, projectId) {
+export async function deployProject(token, projectId, payload) {
   return request(`/api/v1/projects/${projectId}/deploy`, {
     method: "POST",
     token,
+    body: payload,
   });
 }
 

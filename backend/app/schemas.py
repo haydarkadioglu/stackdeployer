@@ -69,10 +69,17 @@ class DeploymentOut(BaseModel):
     id: int
     project_id: int
     status: str
+    deployment_type: Literal["production", "preview"]
     branch: str
+    preview_port: int | None
     error_message: str | None
     started_at: datetime
     completed_at: datetime | None
+
+
+class DeploymentRunRequest(BaseModel):
+    branch: str = Field(default="main", min_length=1, max_length=120)
+    deployment_type: Literal["production", "preview"] = "production"
 
 
 class ProjectEnvironmentCreate(BaseModel):

@@ -87,7 +87,9 @@ class Deployment(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="building", index=True)
+    deployment_type: Mapped[str] = mapped_column(String(16), nullable=False, default="production", index=True)
     branch: Mapped[str] = mapped_column(String(128), nullable=False, default="main")
+    preview_port: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False, index=True

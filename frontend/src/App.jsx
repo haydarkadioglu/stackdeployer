@@ -473,6 +473,8 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
   const [dnsRecords, setDnsRecords] = useState([]);
   const [domainValidation, setDomainValidation] = useState(null);
   const [sslStatus, setSslStatus] = useState(null);
+  const [deploymentsFilter, setDeploymentsFilter] = useState("all");
+  const [previewBranch, setPreviewBranch] = useState("feature-preview");
   const [settingsForm, setSettingsForm] = useState({
     name: "",
     tech_stack: "",
@@ -545,7 +547,7 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
     async function loadTabData() {
       try {
         if (tab === "deployments") {
-          setDeployments(await listProjectDeployments(token, projectId, 50));
+          setDeployments(await listProjectDeployments(token, projectId, 50, deploymentsFilter));
         } else if (tab === "env") {
           setEnvRows(await listProjectEnvironment(token, projectId, revealSecrets));
         } else if (tab === "domain") {
@@ -561,7 +563,7 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
     }
 
     loadTabData();
-  }, [project, tab, token, projectId, setGlobalError, revealSecrets]);
+  }, [project, tab, token, projectId, setGlobalError, revealSecrets, deploymentsFilter]);
 
   useEffect(() => {
     if (tab !== "logs") {
@@ -624,8 +626,17 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
     await onAction(action, project);
     await reloadProjectAndList();
     if (tab === "deployments") {
-      setDeployments(await listProjectDeployments(token, projectId, 50));
+      setDeployments(await listProjectDeployments(token, projectId, 50, deploymentsFilter));
     }
+  }
+
+  async function handlePreviewDeploy() {
+    if (!project) {
+      return;
+    }
+    await onAction("deploy", project, { deployment_type: "preview", branch: previewBranch.trim() || "main" });
+    await reloadProjectAndList();
+    setDeployments(await listProjectDeployments(token, projectId, 50, deploymentsFilter));
   }
 
   async function handleCreateEnv(event) {
@@ -803,33 +814,52 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
       <ProjectTabs projectId={projectId} />
 
       {tab === "deployments" ? (
-        <div className="project-list">
-          {deployments.map((item) => (
-            <article key={item.id} className="project-row">
-              <div className="project-main">
-                <div className="project-title-wrap">
-                  <h3>deployment #{item.id}</h3>
-                  <StatusBadge status={item.status} />
+        <>
+          <form className="project-form" onSubmit={(event) => event.preventDefault()}>
+            <select value={deploymentsFilter} onChange={(event) => setDeploymentsFilter(event.target.value)}>
+              <option value="all">all deployments</option>
+              <option value="production">production only</option>
+              <option value="preview">preview only</option>
+            </select>
+            <input
+              placeholder="preview branch"
+              value={previewBranch}
+              onChange={(event) => setPreviewBranch(event.target.value)}
+            />
+            <button className="ghost-btn" type="button" onClick={handlePreviewDeploy} disabled={busyAction === `deploy:${project.id}`}>
+              deploy preview
+            </button>
+            <button
+              className="ghost-btn"
+              type="button"
+              onClick={() => handleHeaderAction("deploy")}
+              disabled={busyAction === `deploy:${project.id}`}
+            >
+              deploy production
+            </button>
+          </form>
+
+          <div className="project-list">
+            {deployments.map((item) => (
+              <article key={item.id} className="project-row">
+                <div className="project-main">
+                  <div className="project-title-wrap">
+                    <h3>deployment #{item.id}</h3>
+                    <StatusBadge status={item.status} />
+                  </div>
+                  <p>
+                    type: {item.deployment_type || "production"} • branch: {item.branch} • preview port: {item.preview_port || "n/a"}
+                  </p>
+                  <p>
+                    started: {formatWhen(item.started_at)} • finished: {formatWhen(item.completed_at)} • duration: {formatDuration(item.started_at, item.completed_at)}
+                  </p>
+                  {item.error_message ? <p className="error-text">{item.error_message}</p> : null}
                 </div>
-                <p>
-                  branch: {item.branch} • started: {formatWhen(item.started_at)} • finished: {formatWhen(item.completed_at)} • duration: {formatDuration(item.started_at, item.completed_at)}
-                </p>
-                {item.error_message ? <p className="error-text">{item.error_message}</p> : null}
-              </div>
-              <div className="project-actions">
-                <button
-                  className="ghost-btn"
-                  type="button"
-                  onClick={() => handleHeaderAction("deploy")}
-                  disabled={busyAction === `deploy:${project.id}`}
-                >
-                  retry deploy
-                </button>
-              </div>
-            </article>
-          ))}
-          {!deployments.length ? <div className="error-banner">No deployments yet.</div> : null}
-        </div>
+              </article>
+            ))}
+            {!deployments.length ? <div className="error-banner">No deployments yet.</div> : null}
+          </div>
+        </>
       ) : null}
 
       {tab === "logs" ? (
@@ -1533,12 +1563,15 @@ export default function App() {
     }));
   }
 
-  async function handleProjectAction(action, project) {
+  async function handleProjectAction(action, project, options = {}) {
     try {
       setError("");
       setBusyAction(`${action}:${project.id}`);
       if (action === "deploy") {
-        await deployProject(token, project.id);
+        await deployProject(token, project.id, {
+          branch: options.branch || "main",
+          deployment_type: options.deployment_type || "production",
+        });
       } else if (action === "restart") {
         await restartProject(token, project.id);
       } else if (action === "start") {

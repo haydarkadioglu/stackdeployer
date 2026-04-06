@@ -535,3 +535,45 @@ def test_system_info_endpoint(client) -> None:
     assert "app_name" in payload
     assert "services" in payload
     assert isinstance(payload["services"], list)
+
+
+def test_preview_deployment_and_type_filter(client, monkeypatch) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    create_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "preview-project",
+            "git_url": "https://example.com/preview-project.git",
+            "local_path": "/srv/apps/preview-project",
+            "tech_stack": "node",
+            "internal_port": 8093,
+            "start_command": "npm start",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    project_id = create_response.json()["id"]
+
+    from app.routers import projects as projects_router
+
+    monkeypatch.setattr(projects_router.executor, "deploy", lambda plan, stream=None: None)
+
+    deploy_response = client.post(
+        f"/api/v1/projects/{project_id}/deploy",
+        headers=headers,
+        json={"branch": "feature/pr-123", "deployment_type": "preview"},
+    )
+    assert deploy_response.status_code == 202, deploy_response.text
+
+    list_response = client.get(
+        f"/api/v1/projects/{project_id}/deployments?deployment_type=preview",
+        headers=headers,
+    )
+    assert list_response.status_code == 200, list_response.text
+    rows = list_response.json()
+    assert len(rows) >= 1
+    assert rows[0]["deployment_type"] == "preview"
+    assert rows[0]["branch"] == "feature/pr-123"

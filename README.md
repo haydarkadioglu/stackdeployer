@@ -190,6 +190,20 @@ The installer will:
 - Complete admin bootstrap immediately after installation.
 - Replace any weak/default secrets before production traffic.
 - Login endpoint includes temporary lockout after repeated failed attempts.
+- Project `local_path` must stay under `allowed_project_roots` (`backend/.env`) and path traversal (`..`) is rejected.
+- Canonical path checks are applied so symlink-resolved paths that escape allowed roots are blocked.
+
+## Panel Self Update (Git Pull)
+- You can trigger panel self-update from dashboard: `General Settings -> run self update`.
+- The backend executes `git fetch`, `git checkout <branch>`, `git pull --ff-only` on configured repo root.
+- Optional steps can install backend dependencies, run migrations, and rebuild frontend.
+- Configure in `backend/.env`:
+  - `self_update_enabled=true`
+  - `self_update_repo_root=/opt/stackdeployer`
+  - `self_update_default_branch=main`
+  - `self_update_service_name=stackdeployer`
+- After update, restart backend service if runtime code changed:
+  - `sudo systemctl restart stackdeployer`
 
 ## Initial Admin Bootstrap Example
 ```bash

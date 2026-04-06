@@ -167,3 +167,30 @@ class CurrentUserOut(BaseModel):
     username: str
     is_active: bool
     is_superuser: bool
+
+
+class CredentialsUpdateRequest(BaseModel):
+    current_password: str = Field(min_length=8, max_length=128)
+    new_username: str | None = Field(default=None, min_length=3, max_length=120)
+    new_password: str | None = Field(default=None, min_length=8, max_length=128)
+
+    @model_validator(mode="after")
+    def validate_target_fields(self) -> "CredentialsUpdateRequest":
+        if not (self.new_username or self.new_password):
+            raise ValueError("At least one of new_username or new_password must be provided")
+        return self
+
+
+class SelfUpdateRequest(BaseModel):
+    branch: str | None = Field(default=None, min_length=1, max_length=120)
+    install_backend_dependencies: bool = True
+    run_migrations: bool = True
+    rebuild_frontend: bool = True
+
+
+class SelfUpdateResultOut(BaseModel):
+    status: str
+    message: str
+    branch: str
+    restart_required: bool
+    steps: list[CommandResultOut]

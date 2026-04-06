@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import posixpath
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -33,12 +34,15 @@ from ..schemas import (
 )
 from ..ssl_service import SSLService, SSLServiceError
 from ..config import settings
+from ..config import get_allowed_project_roots
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"], dependencies=[Depends(require_admin)])
 executor = Executor()
 nginx_manager = NginxManager()
 ssl_service = SSLService()
 DEFAULT_IMPORT_BASE_PATHS = ["/srv/apps", "/opt/apps", "/home/ubuntu/apps"]
+FORBIDDEN_COMMAND_PATTERN = re.compile(r"[;&|`$><\r\n]")
+WINDOWS_DRIVE_PREFIX_PATTERN = re.compile(r"^[a-zA-Z]:")
 
 
 def _validate_service_constraints(service_type: str, internal_port: int | None, domain: str | None) -> None:
@@ -46,6 +50,62 @@ def _validate_service_constraints(service_type: str, internal_port: int | None, 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="domain is not supported for worker services",
+        )
+
+
+def _resolve_posix_path(path: str) -> str:
+    resolved = Path(path).resolve(strict=False).as_posix()
+    if WINDOWS_DRIVE_PREFIX_PATTERN.match(resolved):
+        resolved = resolved[2:]
+    return posixpath.normpath(resolved)
+
+
+def _validate_local_path(local_path: str) -> str:
+    normalized = local_path.strip()
+    if not normalized.startswith("/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="local_path must be an absolute path",
+        )
+
+    if ".." in PurePosixPath(normalized).parts:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="local_path cannot contain parent directory segments",
+        )
+
+    normalized = posixpath.normpath(normalized)
+
+    allowed_roots = get_allowed_project_roots()
+    for root in allowed_roots:
+        if normalized == root or normalized.startswith(f"{root}/"):
+            resolved = _resolve_posix_path(normalized)
+            for allowed_root in allowed_roots:
+                if resolved == allowed_root or resolved.startswith(f"{allowed_root}/"):
+                    return normalized
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"local_path resolves outside allowed roots: {', '.join(allowed_roots)}",
+            )
+
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"local_path must be inside allowed roots: {', '.join(allowed_roots)}",
+    )
+
+
+def _validate_command(command: str | None, field_name: str) -> None:
+    if command is None:
+        return
+
+    stripped = command.strip()
+    if not stripped:
+        return
+
+    if FORBIDDEN_COMMAND_PATTERN.search(stripped):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{field_name} contains forbidden shell characters",
         )
 
 
@@ -208,6 +268,10 @@ def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Pro
     project_data = payload.model_dump()
     project_data["internal_port"] = resolved_port
 
+    project_data["local_path"] = _validate_local_path(project_data["local_path"])
+    _validate_command(project_data.get("build_command"), "build_command")
+    _validate_command(project_data.get("start_command"), "start_command")
+
     if not project_data.get("start_command"):
         _build, suggested_start, _framework = _suggest_commands(
             project_data.get("local_path"),
@@ -252,7 +316,17 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
 
     _validate_service_constraints(next_service_type, next_internal_port, next_domain)
 
+    normalized_local_path: str | None = None
+    if "local_path" in fields and payload.local_path is not None:
+        normalized_local_path = _validate_local_path(payload.local_path)
+    if "build_command" in fields:
+        _validate_command(payload.build_command, "build_command")
+    if "start_command" in fields:
+        _validate_command(payload.start_command, "start_command")
+
     for key, value in payload.model_dump(exclude_unset=True).items():
+        if key == "local_path" and normalized_local_path is not None:
+            value = normalized_local_path
         setattr(project, key, value)
     project.internal_port = next_internal_port
     db.add(project)
@@ -317,6 +391,8 @@ def list_project_environment(
         .scalars()
         .all()
     )
+    if reveal_secrets and items:
+        _create_log(db, project_id, "INFO", "api", "Environment secrets viewed via API")
     return [_to_env_out(item, reveal_secrets=reveal_secrets) for item in items]
 
 

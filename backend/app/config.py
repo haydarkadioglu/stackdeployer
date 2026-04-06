@@ -1,3 +1,5 @@
+import posixpath
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,6 +15,11 @@ class Settings(BaseSettings):
     auth_lockout_minutes: int = 15
     certbot_email: str = ""
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
+    allowed_project_roots: str = "/srv/apps,/opt/apps,/home/ubuntu/apps"
+    self_update_enabled: bool = True
+    self_update_repo_root: str = "/opt/stackdeployer"
+    self_update_default_branch: str = "main"
+    self_update_service_name: str = "stackdeployer"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -34,3 +41,19 @@ def validate_security_settings() -> None:
 
 def get_cors_origins() -> list[str]:
     return [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]
+
+
+def get_allowed_project_roots() -> list[str]:
+    roots: list[str] = []
+    for raw_root in settings.allowed_project_roots.split(","):
+        root = raw_root.strip()
+        if not root or not root.startswith("/"):
+            continue
+
+        normalized = posixpath.normpath(root)
+        if not normalized.startswith("/"):
+            continue
+        if normalized not in roots:
+            roots.append(normalized)
+
+    return roots or ["/srv/apps"]

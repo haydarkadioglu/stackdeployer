@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from .config import settings
 from .database import get_db
 from .models import User
-from .schemas import BootstrapRequest, CurrentUserOut, LoginRequest, TokenResponse
+from .schemas import BootstrapRequest, CredentialsUpdateRequest, CurrentUserOut, LoginRequest, TokenResponse
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
@@ -148,4 +148,45 @@ def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)
 
 @router.get("/me", response_model=CurrentUserOut)
 def me(current_user: User = Depends(get_current_user)) -> User:
+    return current_user
+
+
+@router.patch("/me", response_model=CurrentUserOut)
+def update_me_credentials(
+    payload: CredentialsUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> User:
+    if not _verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Current password is invalid")
+
+    changed = False
+
+    if payload.new_username:
+        next_username = payload.new_username.strip()
+        if next_username and next_username != current_user.username:
+            existing_user = db.execute(select(User).where(User.username == next_username)).scalar_one_or_none()
+            if existing_user and existing_user.id != current_user.id:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username is already in use")
+            current_user.username = next_username
+            changed = True
+
+    if payload.new_password:
+        if _verify_password(payload.new_password, current_user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="New password must be different from current password",
+            )
+        current_user.password_hash = _hash_password(payload.new_password)
+        changed = True
+
+    if not changed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No credential changes requested",
+        )
+
+    db.add(current_user)
+    db.commit()
+    db.refresh(current_user)
     return current_user

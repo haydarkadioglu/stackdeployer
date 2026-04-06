@@ -139,3 +139,258 @@ def test_ssl_issue_and_renew_with_mock(client, monkeypatch) -> None:
     )
     assert renew_response.status_code == 200, renew_response.text
     assert renew_response.json()["status"] == "ok"
+
+
+def test_create_project_rejects_disallowed_local_path(client) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "bad-path",
+            "git_url": "https://example.com/bad-path.git",
+            "local_path": "/etc/bad-path",
+            "tech_stack": "python",
+            "internal_port": 8082,
+            "start_command": "uvicorn app.main:app --host 0.0.0.0 --port 8082",
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "allowed roots" in response.json()["detail"]
+
+
+def test_create_project_rejects_forbidden_command_chars(client) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "bad-command",
+            "git_url": "https://example.com/bad-command.git",
+            "local_path": "/srv/apps/bad-command",
+            "tech_stack": "node",
+            "internal_port": 8083,
+            "start_command": "npm start; rm -rf /",
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "forbidden shell characters" in response.json()["detail"]
+
+
+def test_create_project_rejects_parent_path_segments(client) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "bad-traversal",
+            "git_url": "https://example.com/bad-traversal.git",
+            "local_path": "/srv/apps/../etc/bad-traversal",
+            "tech_stack": "python",
+            "internal_port": 8084,
+            "start_command": "uvicorn app.main:app --host 0.0.0.0 --port 8084",
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "parent directory segments" in response.json()["detail"]
+
+
+def test_create_project_normalizes_local_path(client) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "normalized-path",
+            "git_url": "https://example.com/normalized-path.git",
+            "local_path": "/srv/apps//team///normalized-path",
+            "tech_stack": "node",
+            "internal_port": 8085,
+            "start_command": "npm start",
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["local_path"] == "/srv/apps/team/normalized-path"
+
+
+def test_update_project_rejects_parent_path_segments(client) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    create_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "patch-path-check",
+            "git_url": "https://example.com/patch-path-check.git",
+            "local_path": "/srv/apps/patch-path-check",
+            "tech_stack": "python",
+            "internal_port": 8086,
+            "start_command": "uvicorn app.main:app --host 0.0.0.0 --port 8086",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    project_id = create_response.json()["id"]
+
+    patch_response = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=headers,
+        json={"local_path": "/srv/apps/../etc/patch-path-check"},
+    )
+    assert patch_response.status_code == 400, patch_response.text
+    assert "parent directory segments" in patch_response.json()["detail"]
+
+
+def test_env_reveal_secrets_creates_audit_log(client) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    create_project_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "env-audit-check",
+            "git_url": "https://example.com/env-audit-check.git",
+            "local_path": "/srv/apps/env-audit-check",
+            "tech_stack": "python",
+            "internal_port": 8087,
+            "start_command": "uvicorn app.main:app --host 0.0.0.0 --port 8087",
+        },
+    )
+    assert create_project_response.status_code == 201, create_project_response.text
+    project_id = create_project_response.json()["id"]
+
+    create_env_response = client.post(
+        f"/api/v1/projects/{project_id}/env",
+        headers=headers,
+        json={"key": "API_KEY", "value": "super-secret", "is_secret": True},
+    )
+    assert create_env_response.status_code == 201, create_env_response.text
+
+    reveal_response = client.get(
+        f"/api/v1/projects/{project_id}/env?reveal_secrets=true",
+        headers=headers,
+    )
+    assert reveal_response.status_code == 200, reveal_response.text
+    rows = reveal_response.json()
+    assert len(rows) == 1
+    assert rows[0]["value"] == "super-secret"
+
+    logs_response = client.get(f"/api/v1/projects/{project_id}/logs", headers=headers)
+    assert logs_response.status_code == 200, logs_response.text
+    messages = [item["message"] for item in logs_response.json()]
+    assert "Environment secrets viewed via API" in messages
+
+
+def test_user_can_change_username_and_password(client) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    update_response = client.patch(
+        "/api/v1/auth/me",
+        headers=headers,
+        json={
+            "current_password": "StrongPass123!",
+            "new_username": "admin2",
+            "new_password": "EvenStronger456!",
+        },
+    )
+    assert update_response.status_code == 200, update_response.text
+    assert update_response.json()["username"] == "admin2"
+
+    old_login_response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin", "password": "StrongPass123!"},
+    )
+    assert old_login_response.status_code == 401, old_login_response.text
+
+    new_login_response = client.post(
+        "/api/v1/auth/login",
+        json={"username": "admin2", "password": "EvenStronger456!"},
+    )
+    assert new_login_response.status_code == 200, new_login_response.text
+
+
+def test_create_project_rejects_when_resolved_path_escapes_allowed_roots(client, monkeypatch) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    from app.routers import projects as projects_router
+
+    monkeypatch.setattr(projects_router, "_resolve_posix_path", lambda path: "/etc/escape")
+
+    response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "resolved-escape",
+            "git_url": "https://example.com/resolved-escape.git",
+            "local_path": "/srv/apps/resolved-escape",
+            "tech_stack": "python",
+            "internal_port": 8088,
+            "start_command": "uvicorn app.main:app --host 0.0.0.0 --port 8088",
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "resolves outside allowed roots" in response.json()["detail"]
+
+
+def test_self_update_endpoint_runs_git_pull_flow(client, monkeypatch, tmp_path) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    from app import config as app_config
+    from app.executor import CommandResult
+    from app.routers import system as system_router
+
+    repo_root = tmp_path / "stackdeployer"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    (repo_root / ".git").mkdir(exist_ok=True)
+
+    monkeypatch.setattr(app_config.settings, "self_update_enabled", True)
+    monkeypatch.setattr(app_config.settings, "self_update_repo_root", str(repo_root))
+    monkeypatch.setattr(app_config.settings, "self_update_default_branch", "main")
+
+    calls = []
+
+    def fake_run(args, cwd=None, timeout=None, stream=None):
+        _ = timeout, stream
+        calls.append((list(args), str(cwd) if cwd else None))
+        return CommandResult(command=list(args), returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(system_router.executor, "run", fake_run)
+
+    response = client.post(
+        "/api/v1/system/self-update",
+        headers=headers,
+        json={
+            "branch": "main",
+            "install_backend_dependencies": False,
+            "run_migrations": False,
+            "rebuild_frontend": False,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["branch"] == "main"
+    assert len(payload["steps"]) == 3
+    assert calls[0][0] == ["git", "fetch", "origin"]
+    assert calls[1][0] == ["git", "checkout", "main"]
+    assert calls[2][0] == ["git", "pull", "--ff-only", "origin", "main"]

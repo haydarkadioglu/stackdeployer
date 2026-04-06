@@ -65,6 +65,14 @@ export async function getMe(token) {
   return request("/api/v1/auth/me", { token });
 }
 
+export async function updateMeCredentials(token, payload) {
+  return request("/api/v1/auth/me", {
+    method: "PATCH",
+    token,
+    body: payload,
+  });
+}
+
 export async function listProjects(token) {
   return request("/api/v1/projects", { token });
 }
@@ -180,6 +188,14 @@ export async function removeNginxRoute(token, projectId, siteName) {
   return request(`/api/v1/projects/${projectId}/nginx/${encodeURIComponent(siteName)}`, {
     method: "DELETE",
     token,
+  });
+}
+
+export async function runSelfUpdate(token, payload) {
+  return request("/api/v1/system/self-update", {
+    method: "POST",
+    token,
+    body: payload,
   });
 }
 

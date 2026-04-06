@@ -7,6 +7,7 @@ from .auth import router as auth_router
 from .config import get_cors_origins, settings, validate_security_settings
 from .database import init_db
 from .routers.projects import router as projects_router
+from .routers.system import router as system_router
 from .routers.ws import router as ws_router
 
 
@@ -27,6 +28,7 @@ app.add_middleware(
 )
 app.include_router(auth_router)
 app.include_router(projects_router)
+app.include_router(system_router)
 app.include_router(ws_router)
 
 

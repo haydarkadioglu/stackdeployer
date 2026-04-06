@@ -19,8 +19,10 @@ import {
   login,
   removeNginxRoute,
   restartProject,
+  runSelfUpdate,
   startProject,
   stopProject,
+  updateMeCredentials,
   updateProject,
   updateProjectEnvironment,
 } from "./services/api";
@@ -45,6 +47,32 @@ function formatLogLine(log) {
   const source = log.source || "system";
   const message = log.message || "";
   return `[ ${stamp} ] [${source}] ${message}`;
+}
+
+function formatDuration(startedAt, completedAt) {
+  if (!startedAt) {
+    return "n/a";
+  }
+  const start = new Date(startedAt).valueOf();
+  const end = completedAt ? new Date(completedAt).valueOf() : Date.now();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) {
+    return "n/a";
+  }
+
+  const totalSeconds = Math.round((end - start) / 1000);
+  if (totalSeconds < 60) {
+    return `${totalSeconds}s`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
+}
+
+function isLikelyDomain(value) {
+  if (!value) {
+    return false;
+  }
+  return /^(?!-)[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)+$/.test(value);
 }
 
 function StatusBadge({ status }) {
@@ -102,37 +130,58 @@ function ProjectsIndexPage({
   setImportFilter,
   onLoadImportPaths,
   onStackPreset,
+  onApplySuggestedName,
 }) {
   const navigate = useNavigate();
+  const [stepError, setStepError] = useState("");
 
   const isPython = (newProject.tech_stack || "").toLowerCase() === "python";
+  const existingProjectPaths = new Set(projects.map((project) => project.local_path));
+  const analyzedConflicts = new Set(analyzedInfo?.conflicting_paths || []);
+  const selectedPathConflict = existingProjectPaths.has(newProject.local_path) || analyzedConflicts.has(newProject.local_path);
+
+  const importErrors = [];
+  if (newProject.name.trim().length <= 1) {
+    importErrors.push("project name is required");
+  }
+  if (newProject.git_url.trim().length <= 3) {
+    importErrors.push("git url is required");
+  }
+  if (newProject.local_path.trim().length <= 1) {
+    importErrors.push("local path is required");
+  }
+  if (selectedPathConflict) {
+    importErrors.push("selected local path is already used");
+  }
+
+  const runtimeErrors = [];
+  if (newProject.tech_stack.trim().length <= 1) {
+    runtimeErrors.push("tech stack is required");
+  }
 
   function canContinueFromImport() {
-    return (
-      newProject.name.trim().length > 1
-      && newProject.git_url.trim().length > 3
-      && newProject.local_path.trim().length > 1
-    );
+    return importErrors.length === 0;
   }
 
   function canContinueFromRuntime() {
-    if (newProject.service_type === "web") {
-      return newProject.tech_stack.trim().length > 1;
-    }
-    return newProject.tech_stack.trim().length > 1;
+    return runtimeErrors.length === 0;
   }
 
   function goNext() {
     if (wizardStep === 1 && !canContinueFromImport()) {
+      setStepError(importErrors[0] || "Import step has validation errors.");
       return;
     }
     if (wizardStep === 2 && !canContinueFromRuntime()) {
+      setStepError(runtimeErrors[0] || "Runtime step has validation errors.");
       return;
     }
+    setStepError("");
     setWizardStep((prev) => Math.min(prev + 1, 3));
   }
 
   function goPrev() {
+    setStepError("");
     setWizardStep((prev) => Math.max(prev - 1, 1));
   }
 
@@ -173,6 +222,14 @@ function ProjectsIndexPage({
               onChange={(event) => setNewProject((prev) => ({ ...prev, git_url: event.target.value }))}
               required
             />
+            {analyzedInfo?.suggested_project_name ? (
+              <div className="wizard-inline-help">
+                <span>suggested name: {analyzedInfo.suggested_project_name}</span>
+                <button type="button" className="ghost-btn" onClick={onApplySuggestedName}>
+                  use suggestion
+                </button>
+              </div>
+            ) : null}
             <button type="button" className="ghost-btn" onClick={onAnalyze} disabled={analyzeBusy}>
               {analyzeBusy ? "analyzing..." : "analyze import"}
             </button>
@@ -195,8 +252,8 @@ function ProjectsIndexPage({
                   .filter((path) => path.toLowerCase().includes(importFilter.trim().toLowerCase()))
                   .slice(0, 120)
                   .map((path) => (
-                    <option key={path} value={path}>
-                      {path}
+                    <option key={path} value={path} disabled={existingProjectPaths.has(path) || analyzedConflicts.has(path)}>
+                      {path}{existingProjectPaths.has(path) || analyzedConflicts.has(path) ? " (in use)" : ""}
                     </option>
                   ))}
               </select>
@@ -207,8 +264,8 @@ function ProjectsIndexPage({
                 onChange={(event) => setNewProject((prev) => ({ ...prev, local_path: event.target.value }))}
               >
                 {analyzedInfo.suggested_local_paths.map((path) => (
-                  <option key={path} value={path}>
-                    {path}
+                  <option key={path} value={path} disabled={existingProjectPaths.has(path) || analyzedConflicts.has(path)}>
+                    {path}{existingProjectPaths.has(path) || analyzedConflicts.has(path) ? " (in use)" : ""}
                   </option>
                 ))}
               </select>
@@ -225,6 +282,22 @@ function ProjectsIndexPage({
                 value={`stack=${analyzedInfo.detected_stack || "unknown"} framework=${analyzedInfo.detected_python_framework || "n/a"} next_port=${analyzedInfo.suggested_port}`}
                 readOnly
               />
+            ) : null}
+            {analyzedInfo?.suggested_project_name ? (
+              <input value={`suggested project name=${analyzedInfo.suggested_project_name}`} readOnly />
+            ) : null}
+            {selectedPathConflict ? (
+              <div className="error-banner">Selected local path already belongs to an existing project.</div>
+            ) : null}
+            {analyzedInfo?.conflicting_paths?.length ? (
+              <div className="error-banner">Analyzer detected conflicting paths: {analyzedInfo.conflicting_paths.join(", ")}</div>
+            ) : null}
+            {importErrors.length ? (
+              <div className="wizard-field-errors">
+                {importErrors.map((message) => (
+                  <p key={message}>{message}</p>
+                ))}
+              </div>
             ) : null}
           </>
         ) : null}
@@ -268,6 +341,13 @@ function ProjectsIndexPage({
               onChange={(event) => setNewProject((prev) => ({ ...prev, domain: event.target.value }))}
               disabled={newProject.service_type === "worker"}
             />
+            {runtimeErrors.length ? (
+              <div className="wizard-field-errors">
+                {runtimeErrors.map((message) => (
+                  <p key={message}>{message}</p>
+                ))}
+              </div>
+            ) : null}
           </>
         ) : null}
 
@@ -286,6 +366,7 @@ function ProjectsIndexPage({
         ) : null}
 
         <div className="wizard-nav">
+          {stepError ? <div className="wizard-error">{stepError}</div> : null}
           <button type="button" className="ghost-btn" onClick={goPrev} disabled={wizardStep === 1}>
             back
           </button>
@@ -294,7 +375,7 @@ function ProjectsIndexPage({
               next
             </button>
           ) : (
-            <button type="submit" className="auth-btn" disabled={creatingProject}>
+            <button type="submit" className="auth-btn" disabled={creatingProject || importErrors.length > 0 || runtimeErrors.length > 0}>
               {creatingProject ? "creating..." : "create project"}
             </button>
           )}
@@ -356,6 +437,9 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
   const [logLines, setLogLines] = useState([]);
   const [wsConnected, setWsConnected] = useState(false);
   const [envRows, setEnvRows] = useState([]);
+  const [revealSecrets, setRevealSecrets] = useState(false);
+  const [editingEnvId, setEditingEnvId] = useState(null);
+  const [editingEnvValue, setEditingEnvValue] = useState("");
   const [envForm, setEnvForm] = useState({ key: "", value: "", is_secret: false });
   const [domainForm, setDomainForm] = useState({ site_name: "", domain: "" });
   const [settingsForm, setSettingsForm] = useState({
@@ -367,6 +451,7 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
     internal_port: "",
   });
   const [nextPort, setNextPort] = useState(null);
+  const [initialSettingsSnapshot, setInitialSettingsSnapshot] = useState("");
 
   useEffect(() => {
     if (!Number.isInteger(projectId) || projectId < 1) {
@@ -402,6 +487,14 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
           local_path: data.local_path || "",
           internal_port: data.internal_port || "",
         });
+        setInitialSettingsSnapshot(JSON.stringify({
+          name: data.name || "",
+          tech_stack: data.tech_stack || "",
+          build_command: data.build_command || "",
+          start_command: data.start_command || "",
+          local_path: data.local_path || "",
+          internal_port: data.internal_port || "",
+        }));
       } catch (err) {
         setGlobalError(err.message || "Project load failed");
       }
@@ -423,7 +516,7 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
         if (tab === "deployments") {
           setDeployments(await listProjectDeployments(token, projectId, 50));
         } else if (tab === "env") {
-          setEnvRows(await listProjectEnvironment(token, projectId));
+          setEnvRows(await listProjectEnvironment(token, projectId, revealSecrets));
         } else if (tab === "settings") {
           const next = await getNextPort(token, 8000);
           setNextPort(next?.next_port || null);
@@ -434,7 +527,7 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
     }
 
     loadTabData();
-  }, [project, tab, token, projectId, setGlobalError]);
+  }, [project, tab, token, projectId, setGlobalError, revealSecrets]);
 
   useEffect(() => {
     if (tab !== "logs") {
@@ -505,7 +598,7 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
     event.preventDefault();
     try {
       await createProjectEnvironment(token, projectId, envForm);
-      setEnvRows(await listProjectEnvironment(token, projectId));
+      setEnvRows(await listProjectEnvironment(token, projectId, revealSecrets));
       setEnvForm({ key: "", value: "", is_secret: false });
     } catch (err) {
       setGlobalError(err.message || "Env create failed");
@@ -515,7 +608,7 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
   async function handleToggleSecret(row) {
     try {
       await updateProjectEnvironment(token, projectId, row.id, { is_secret: !row.is_secret });
-      setEnvRows(await listProjectEnvironment(token, projectId));
+      setEnvRows(await listProjectEnvironment(token, projectId, revealSecrets));
     } catch (err) {
       setGlobalError(err.message || "Env update failed");
     }
@@ -524,9 +617,20 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
   async function handleDeleteEnv(row) {
     try {
       await deleteProjectEnvironment(token, projectId, row.id);
-      setEnvRows(await listProjectEnvironment(token, projectId));
+      setEnvRows(await listProjectEnvironment(token, projectId, revealSecrets));
     } catch (err) {
       setGlobalError(err.message || "Env delete failed");
+    }
+  }
+
+  async function handleSaveEnvValue(row) {
+    try {
+      await updateProjectEnvironment(token, projectId, row.id, { value: editingEnvValue });
+      setEditingEnvId(null);
+      setEditingEnvValue("");
+      setEnvRows(await listProjectEnvironment(token, projectId, revealSecrets));
+    } catch (err) {
+      setGlobalError(err.message || "Env value save failed");
     }
   }
 
@@ -562,10 +666,14 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
         internal_port: settingsForm.internal_port ? Number(settingsForm.internal_port) : null,
       });
       await reloadProjectAndList();
+      setInitialSettingsSnapshot(JSON.stringify(settingsForm));
     } catch (err) {
       setGlobalError(err.message || "Settings save failed");
     }
   }
+
+  const isSettingsDirty = initialSettingsSnapshot && JSON.stringify(settingsForm) !== initialSettingsSnapshot;
+  const domainValid = isLikelyDomain(domainForm.domain);
 
   if (!project) {
     return <section className="project-section"><h2>loading project...</h2></section>;
@@ -607,7 +715,9 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
                   <h3>deployment #{item.id}</h3>
                   <StatusBadge status={item.status} />
                 </div>
-                <p>branch: {item.branch} • started: {formatWhen(item.started_at)} • finished: {formatWhen(item.completed_at)}</p>
+                <p>
+                  branch: {item.branch} • started: {formatWhen(item.started_at)} • finished: {formatWhen(item.completed_at)} • duration: {formatDuration(item.started_at, item.completed_at)}
+                </p>
                 {item.error_message ? <p className="error-text">{item.error_message}</p> : null}
               </div>
               <div className="project-actions">
@@ -640,6 +750,11 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
 
       {tab === "env" ? (
         <>
+          <div className="project-actions" style={{ marginBottom: 10 }}>
+            <button className="ghost-btn" type="button" onClick={() => setRevealSecrets((prev) => !prev)}>
+              {revealSecrets ? "hide secrets" : "reveal secrets"}
+            </button>
+          </div>
           <form className="project-form" onSubmit={handleCreateEnv}>
             <input
               placeholder="key"
@@ -671,9 +786,30 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
                     <h3>{row.key}</h3>
                     <StatusBadge status={row.is_secret ? "secret" : "plain"} />
                   </div>
-                  <p>{row.value}</p>
+                  {editingEnvId === row.id ? (
+                    <input
+                      value={editingEnvValue}
+                      onChange={(event) => setEditingEnvValue(event.target.value)}
+                    />
+                  ) : (
+                    <p>{row.value}</p>
+                  )}
                 </div>
                 <div className="project-actions">
+                  {editingEnvId === row.id ? (
+                    <>
+                      <button className="ghost-btn" type="button" onClick={() => handleSaveEnvValue(row)}>
+                        save
+                      </button>
+                      <button className="ghost-btn" type="button" onClick={() => { setEditingEnvId(null); setEditingEnvValue(""); }}>
+                        cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button className="ghost-btn" type="button" onClick={() => { setEditingEnvId(row.id); setEditingEnvValue(row.value); }}>
+                      edit
+                    </button>
+                  )}
                   <button className="ghost-btn" type="button" onClick={() => handleToggleSecret(row)}>
                     toggle secret
                   </button>
@@ -689,61 +825,271 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
       ) : null}
 
       {tab === "domain" ? (
-        <form className="project-form" onSubmit={handleApplyDomain}>
-          <input
-            placeholder="site name"
-            value={domainForm.site_name}
-            onChange={(event) => setDomainForm((prev) => ({ ...prev, site_name: event.target.value }))}
-            required
-          />
-          <input
-            placeholder="domain"
-            value={domainForm.domain}
-            onChange={(event) => setDomainForm((prev) => ({ ...prev, domain: event.target.value }))}
-            required
-          />
-          <button type="submit" className="auth-btn">apply route</button>
-          <button type="button" className="ghost-btn" onClick={handleRemoveDomain}>remove route</button>
-        </form>
+        <>
+          <div className="wizard-inline-help" style={{ marginBottom: 10 }}>
+            <span>current domain: {project.domain || "not configured"} • service type: {project.service_type}</span>
+          </div>
+          {project.service_type !== "web" ? (
+            <div className="error-banner">Domain mapping is only available for web services.</div>
+          ) : null}
+          {!domainValid && domainForm.domain ? (
+            <div className="error-banner">Domain format looks invalid. Example: api.example.com</div>
+          ) : null}
+          <form className="project-form" onSubmit={handleApplyDomain}>
+            <input
+              placeholder="site name"
+              value={domainForm.site_name}
+              onChange={(event) => setDomainForm((prev) => ({ ...prev, site_name: event.target.value }))}
+              required
+            />
+            <input
+              placeholder="domain"
+              value={domainForm.domain}
+              onChange={(event) => setDomainForm((prev) => ({ ...prev, domain: event.target.value }))}
+              required
+              disabled={project.service_type !== "web"}
+            />
+            <button type="submit" className="auth-btn" disabled={project.service_type !== "web" || !domainValid}>
+              apply route
+            </button>
+            <button type="button" className="ghost-btn" onClick={handleRemoveDomain} disabled={project.service_type !== "web"}>
+              remove route
+            </button>
+          </form>
+        </>
       ) : null}
 
       {tab === "settings" ? (
-        <form className="project-form" onSubmit={handleSaveSettings}>
-          <input
-            placeholder="name"
-            value={settingsForm.name}
-            onChange={(event) => setSettingsForm((prev) => ({ ...prev, name: event.target.value }))}
-            required
-          />
-          <input
-            placeholder="tech stack"
-            value={settingsForm.tech_stack}
-            onChange={(event) => setSettingsForm((prev) => ({ ...prev, tech_stack: event.target.value }))}
-            required
-          />
-          <input
-            placeholder="local path"
-            value={settingsForm.local_path}
-            onChange={(event) => setSettingsForm((prev) => ({ ...prev, local_path: event.target.value }))}
-            required
-          />
-          <input
-            placeholder={`internal port (next auto: ${nextPort || "..."})`}
-            value={settingsForm.internal_port}
-            onChange={(event) => setSettingsForm((prev) => ({ ...prev, internal_port: event.target.value }))}
-          />
-          <input
-            placeholder="build command"
-            value={settingsForm.build_command}
-            onChange={(event) => setSettingsForm((prev) => ({ ...prev, build_command: event.target.value }))}
-          />
-          <input
-            placeholder="start command"
-            value={settingsForm.start_command}
-            onChange={(event) => setSettingsForm((prev) => ({ ...prev, start_command: event.target.value }))}
-          />
-          <button type="submit" className="auth-btn">save settings</button>
-        </form>
+        <>
+          {isSettingsDirty ? (
+            <div className="wizard-field-errors">
+              <p>You have unsaved settings changes.</p>
+            </div>
+          ) : null}
+          <form className="project-form" onSubmit={handleSaveSettings}>
+            <input
+              placeholder="name"
+              value={settingsForm.name}
+              onChange={(event) => setSettingsForm((prev) => ({ ...prev, name: event.target.value }))}
+              required
+            />
+            <input
+              placeholder="tech stack"
+              value={settingsForm.tech_stack}
+              onChange={(event) => setSettingsForm((prev) => ({ ...prev, tech_stack: event.target.value }))}
+              required
+            />
+            <input
+              placeholder="local path"
+              value={settingsForm.local_path}
+              onChange={(event) => setSettingsForm((prev) => ({ ...prev, local_path: event.target.value }))}
+              required
+            />
+            <input
+              placeholder={`internal port (next auto: ${nextPort || "..."})`}
+              value={settingsForm.internal_port}
+              onChange={(event) => setSettingsForm((prev) => ({ ...prev, internal_port: event.target.value }))}
+            />
+            <input
+              placeholder="build command"
+              value={settingsForm.build_command}
+              onChange={(event) => setSettingsForm((prev) => ({ ...prev, build_command: event.target.value }))}
+            />
+            <input
+              placeholder="start command"
+              value={settingsForm.start_command}
+              onChange={(event) => setSettingsForm((prev) => ({ ...prev, start_command: event.target.value }))}
+            />
+            <button type="submit" className="auth-btn" disabled={!isSettingsDirty}>save settings</button>
+          </form>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+function AccountPage({ token, me, setMe, setGlobalError }) {
+  const [form, setForm] = useState({
+    current_password: "",
+    new_username: me?.username || "",
+    new_password: "",
+    confirm_password: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [successMessage, setSuccessMessage] = useState("");
+
+  useEffect(() => {
+    setForm((prev) => ({ ...prev, new_username: me?.username || prev.new_username }));
+  }, [me]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setSuccessMessage("");
+
+    const currentPassword = form.current_password.trim();
+    const newUsername = form.new_username.trim();
+    const newPassword = form.new_password;
+    const confirmPassword = form.confirm_password;
+
+    if (!currentPassword) {
+      setGlobalError("Current password is required");
+      return;
+    }
+
+    if (newPassword && newPassword !== confirmPassword) {
+      setGlobalError("New password and confirmation do not match");
+      return;
+    }
+
+    const payload = { current_password: currentPassword };
+    if (newUsername && newUsername !== me?.username) {
+      payload.new_username = newUsername;
+    }
+    if (newPassword) {
+      payload.new_password = newPassword;
+    }
+
+    if (!payload.new_username && !payload.new_password) {
+      setGlobalError("No credential change requested");
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setGlobalError("");
+      const updated = await updateMeCredentials(token, payload);
+      setMe(updated);
+      setSuccessMessage("Credentials updated successfully");
+      setForm((prev) => ({
+        ...prev,
+        current_password: "",
+        new_password: "",
+        confirm_password: "",
+        new_username: updated.username,
+      }));
+    } catch (err) {
+      setGlobalError(err.message || "Credential update failed");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="project-section">
+      <h2>ACCOUNT SETTINGS</h2>
+      <p className="detail-meta">Panel kullanici adi ve sifresini buradan degistirebilirsin.</p>
+      <form className="project-form" onSubmit={handleSubmit}>
+        <input
+          type="password"
+          placeholder="current password"
+          value={form.current_password}
+          onChange={(event) => setForm((prev) => ({ ...prev, current_password: event.target.value }))}
+          required
+        />
+        <input
+          placeholder="new username"
+          value={form.new_username}
+          onChange={(event) => setForm((prev) => ({ ...prev, new_username: event.target.value }))}
+        />
+        <input
+          type="password"
+          placeholder="new password"
+          value={form.new_password}
+          onChange={(event) => setForm((prev) => ({ ...prev, new_password: event.target.value }))}
+        />
+        <input
+          type="password"
+          placeholder="confirm new password"
+          value={form.confirm_password}
+          onChange={(event) => setForm((prev) => ({ ...prev, confirm_password: event.target.value }))}
+        />
+        {successMessage ? <div className="wizard-inline-help"><span>{successMessage}</span></div> : null}
+        <button type="submit" className="auth-btn" disabled={saving}>
+          {saving ? "saving..." : "save credentials"}
+        </button>
+      </form>
+    </section>
+  );
+}
+
+function GeneralSettingsPage({ token, setGlobalError }) {
+  const [updateForm, setUpdateForm] = useState({
+    branch: "main",
+    install_backend_dependencies: true,
+    run_migrations: true,
+    rebuild_frontend: true,
+  });
+  const [updating, setUpdating] = useState(false);
+  const [updateResult, setUpdateResult] = useState(null);
+
+  async function handleSelfUpdate(event) {
+    event.preventDefault();
+    try {
+      setGlobalError("");
+      setUpdating(true);
+      const result = await runSelfUpdate(token, {
+        branch: updateForm.branch.trim() || null,
+        install_backend_dependencies: updateForm.install_backend_dependencies,
+        run_migrations: updateForm.run_migrations,
+        rebuild_frontend: updateForm.rebuild_frontend,
+      });
+      setUpdateResult(result);
+    } catch (err) {
+      setGlobalError(err.message || "Self update failed");
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  return (
+    <section className="project-section">
+      <h2>GENERAL SETTINGS</h2>
+      <p className="detail-meta">Panel repository'sini panelden guncelle (git pull + optional build steps).</p>
+      <form className="project-form" onSubmit={handleSelfUpdate}>
+        <input
+          placeholder="git branch"
+          value={updateForm.branch}
+          onChange={(event) => setUpdateForm((prev) => ({ ...prev, branch: event.target.value }))}
+        />
+        <select
+          value={updateForm.install_backend_dependencies ? "yes" : "no"}
+          onChange={(event) => setUpdateForm((prev) => ({ ...prev, install_backend_dependencies: event.target.value === "yes" }))}
+        >
+          <option value="yes">install backend dependencies: yes</option>
+          <option value="no">install backend dependencies: no</option>
+        </select>
+        <select
+          value={updateForm.run_migrations ? "yes" : "no"}
+          onChange={(event) => setUpdateForm((prev) => ({ ...prev, run_migrations: event.target.value === "yes" }))}
+        >
+          <option value="yes">run migrations: yes</option>
+          <option value="no">run migrations: no</option>
+        </select>
+        <select
+          value={updateForm.rebuild_frontend ? "yes" : "no"}
+          onChange={(event) => setUpdateForm((prev) => ({ ...prev, rebuild_frontend: event.target.value === "yes" }))}
+        >
+          <option value="yes">rebuild frontend: yes</option>
+          <option value="no">rebuild frontend: no</option>
+        </select>
+        <button type="submit" className="auth-btn" disabled={updating}>
+          {updating ? "updating..." : "run self update"}
+        </button>
+      </form>
+
+      {updateResult ? (
+        <>
+          <div className="wizard-inline-help" style={{ marginBottom: 10 }}>
+            <span>{updateResult.message}</span>
+          </div>
+          <div className="terminal">
+            {updateResult.steps?.map((step, index) => (
+              <p key={`${index}-${step.command.join(" ")}`}>
+                $ {step.command.join(" ")} [{step.returncode}]
+              </p>
+            ))}
+          </div>
+        </>
       ) : null}
     </section>
   );
@@ -882,6 +1228,7 @@ export default function App() {
 
       setNewProject((prev) => ({
         ...prev,
+        name: prev.name || analyzed.suggested_project_name || "",
         local_path: prev.local_path || analyzed.suggested_local_paths?.[0] || "",
         tech_stack: analyzed.detected_stack || prev.tech_stack,
         build_command: prev.build_command || analyzed.suggested_build_command || "",
@@ -938,6 +1285,16 @@ export default function App() {
     });
   }
 
+  function applySuggestedName() {
+    if (!analyzedInfo?.suggested_project_name) {
+      return;
+    }
+    setNewProject((prev) => ({
+      ...prev,
+      name: analyzedInfo.suggested_project_name,
+    }));
+  }
+
   async function handleProjectAction(action, project) {
     try {
       setError("");
@@ -991,6 +1348,12 @@ export default function App() {
             <NavLink to="/projects" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
               All Projects
             </NavLink>
+            <NavLink to="/account" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
+              Account
+            </NavLink>
+            <NavLink to="/settings/general" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
+              General Settings
+            </NavLink>
           </div>
           <div className="menu-group">
             <p>QUICK LINKS</p>
@@ -1027,6 +1390,7 @@ export default function App() {
                   setImportFilter={setImportFilter}
                   onLoadImportPaths={handleLoadImportPaths}
                   onStackPreset={applyStackPreset}
+                  onApplySuggestedName={applySuggestedName}
                 />
               }
             />
@@ -1045,6 +1409,14 @@ export default function App() {
                   setGlobalError={setError}
                 />
               }
+            />
+            <Route
+              path="/account"
+              element={<AccountPage token={token} me={me} setMe={setMe} setGlobalError={setError} />}
+            />
+            <Route
+              path="/settings/general"
+              element={<GeneralSettingsPage token={token} setGlobalError={setError} />}
             />
             <Route path="*" element={<Navigate to="/projects" replace />} />
           </Routes>

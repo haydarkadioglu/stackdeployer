@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
+    auth_max_failed_attempts: int = 5
+    auth_failure_window_minutes: int = 10
+    auth_lockout_minutes: int = 15
+    certbot_email: str = ""
     cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
 
     model_config = SettingsConfigDict(

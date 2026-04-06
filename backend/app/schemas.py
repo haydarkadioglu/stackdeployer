@@ -78,6 +78,15 @@ class CommandResultOut(BaseModel):
     stderr: str
 
 
+class SSLIssueRequest(BaseModel):
+    email: str | None = Field(default=None, max_length=255)
+    extra_domains: list[str] = Field(default_factory=list)
+
+
+class SSLRenewRequest(BaseModel):
+    dry_run: bool = False
+
+
 class BootstrapRequest(BaseModel):
     username: str = Field(min_length=3, max_length=120)
     password: str = Field(min_length=8, max_length=128)

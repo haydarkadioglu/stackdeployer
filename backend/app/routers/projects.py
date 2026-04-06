@@ -18,11 +18,16 @@ from ..schemas import (
     ProjectCreate,
     ProjectOut,
     ProjectUpdate,
+    SSLIssueRequest,
+    SSLRenewRequest,
 )
+from ..ssl_service import SSLService, SSLServiceError
+from ..config import settings
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"], dependencies=[Depends(require_admin)])
 executor = Executor()
 nginx_manager = NginxManager()
+ssl_service = SSLService()
 
 
 def _validate_service_constraints(service_type: str, internal_port: int | None, domain: str | None) -> None:
@@ -75,10 +80,11 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> Project:
 @router.patch("/{project_id}", response_model=ProjectOut)
 def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depends(get_db)) -> Project:
     project = _get_project_or_404(db, project_id)
+    fields = payload.model_fields_set
 
-    next_service_type = payload.service_type or project.service_type
-    next_internal_port = payload.internal_port if payload.internal_port is not None else project.internal_port
-    next_domain = payload.domain if payload.domain is not None else project.domain
+    next_service_type = payload.service_type if "service_type" in fields else project.service_type
+    next_internal_port = payload.internal_port if "internal_port" in fields else project.internal_port
+    next_domain = payload.domain if "domain" in fields else project.domain
     _validate_service_constraints(next_service_type, next_internal_port, next_domain)
 
     for key, value in payload.model_dump(exclude_unset=True).items():
@@ -239,4 +245,47 @@ def remove_nginx(project_id: int, site_name: str, db: Session = Depends(get_db))
         nginx_manager.remove_site(site_name)
         return {"status": "ok", "removed": site_name}
     except (NginxConfigError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/ssl/issue")
+def issue_ssl(project_id: int, payload: SSLIssueRequest, db: Session = Depends(get_db)) -> dict[str, str]:
+    project = _get_project_or_404(db, project_id)
+    if project.service_type != "web":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SSL issuance is only available for web services",
+        )
+    if not project.domain:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="project domain is required before issuing SSL",
+        )
+
+    email = payload.email or settings.certbot_email
+    if not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="email is required (request email or certbot_email setting)",
+        )
+
+    try:
+        output = ssl_service.issue_certificate(
+            project.domain,
+            email=email,
+            extra_domains=payload.extra_domains,
+        )
+        _create_log(db, project.id, "INFO", "ssl", f"SSL issued for {project.domain}")
+        return {"status": "ok", "message": output}
+    except SSLServiceError as exc:
+        _create_log(db, project.id, "ERROR", "ssl", str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/ssl/renew")
+def renew_ssl(payload: SSLRenewRequest) -> dict[str, str]:
+    try:
+        output = ssl_service.renew_certificates(dry_run=payload.dry_run)
+        return {"status": "ok", "message": output}
+    except SSLServiceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

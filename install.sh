@@ -4,6 +4,7 @@ set -euo pipefail
 APP_ROOT="${APP_ROOT:-/opt/stackdeployer}"
 APP_PORT="${APP_PORT:-8001}"
 PANEL_SERVER_NAME="${PANEL_SERVER_NAME:-_}"
+CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_SRC_DIR="${SCRIPT_DIR}/backend"
 BACKEND_DST_DIR="${APP_ROOT}/backend"
@@ -180,6 +181,7 @@ database_url=sqlite:///${BACKEND_DST_DIR}/stackdeployer.db
 jwt_secret=${jwt_secret}
 jwt_algorithm=HS256
 jwt_access_token_expire_minutes=60
+certbot_email=${CERTBOT_EMAIL}
 EOF
 }
 

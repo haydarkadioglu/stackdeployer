@@ -19,7 +19,7 @@ cd stackdeployer
 2. Run installer from project root (`PANEL_SERVER_NAME` can be your domain or subdomain):
 
 ```bash
-sudo PANEL_SERVER_NAME=panel.example.com bash install.sh
+sudo PANEL_SERVER_NAME=panel.example.com CERTBOT_EMAIL=admin@example.com bash install.sh
 ```
 
 3. Check service health:
@@ -78,6 +78,24 @@ For root + www:
 
 ```bash
 sudo certbot --nginx -d example.com -d www.example.com
+```
+
+You can also trigger SSL from StackDeployer API:
+
+```bash
+curl -X POST http://127.0.0.1:8001/api/v1/projects/<PROJECT_ID>/ssl/issue \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","extra_domains":["www.example.com"]}'
+```
+
+Renew all certificates (optional dry-run):
+
+```bash
+curl -X POST http://127.0.0.1:8001/api/v1/projects/ssl/renew \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"dry_run":true}'
 ```
 
 ### 7. Optional local development flow
@@ -143,6 +161,7 @@ The installer will:
 - Keep backend bound to `127.0.0.1` and expose only via Nginx.
 - Complete admin bootstrap immediately after installation.
 - Replace any weak/default secrets before production traffic.
+- Login endpoint includes temporary lockout after repeated failed attempts.
 
 ## Initial Admin Bootstrap Example
 ```bash

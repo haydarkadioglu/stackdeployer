@@ -6,7 +6,7 @@ import hmac
 import os
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,6 +18,40 @@ from .schemas import BootstrapRequest, CurrentUserOut, LoginRequest, TokenRespon
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
+failed_attempts: dict[str, list[datetime]] = {}
+locked_until: dict[str, datetime] = {}
+
+
+def _build_rate_limit_key(username: str, request: Request) -> str:
+    ip = request.client.host if request.client else "unknown"
+    return f"{username.lower()}@{ip}"
+
+
+def _check_lockout(key: str) -> None:
+    now = datetime.now(timezone.utc)
+    lock_deadline = locked_until.get(key)
+    if lock_deadline and lock_deadline > now:
+        seconds_left = int((lock_deadline - now).total_seconds())
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Too many failed attempts. Try again in {seconds_left}s",
+        )
+
+
+def _record_failed_attempt(key: str) -> None:
+    now = datetime.now(timezone.utc)
+    window = timedelta(minutes=settings.auth_failure_window_minutes)
+    attempts = [ts for ts in failed_attempts.get(key, []) if ts > now - window]
+    attempts.append(now)
+    failed_attempts[key] = attempts
+
+    if len(attempts) >= settings.auth_max_failed_attempts:
+        locked_until[key] = now + timedelta(minutes=settings.auth_lockout_minutes)
+
+
+def _clear_failed_attempts(key: str) -> None:
+    failed_attempts.pop(key, None)
+    locked_until.pop(key, None)
 
 
 def _hash_password(password: str, salt: str | None = None) -> str:
@@ -97,10 +131,16 @@ def bootstrap_admin(payload: BootstrapRequest, db: Session = Depends(get_db)) ->
 
 
 @router.post("/login", response_model=TokenResponse)
-def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
+def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> TokenResponse:
+    key = _build_rate_limit_key(payload.username, request)
+    _check_lockout(key)
+
     user = db.execute(select(User).where(User.username == payload.username)).scalar_one_or_none()
     if not user or not _verify_password(payload.password, user.password_hash):
+        _record_failed_attempt(key)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    _clear_failed_attempts(key)
 
     token = _create_access_token(user)
     return TokenResponse(access_token=token)

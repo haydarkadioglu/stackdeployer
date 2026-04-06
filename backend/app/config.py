@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 60
+    cors_origins: str = "http://127.0.0.1:5173,http://localhost:5173"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -25,3 +26,7 @@ def validate_security_settings() -> None:
             raise ValueError(
                 "Invalid jwt_secret for production. Set a strong random secret with at least 32 characters."
             )
+
+
+def get_cors_origins() -> list[str]:
+    return [origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()]

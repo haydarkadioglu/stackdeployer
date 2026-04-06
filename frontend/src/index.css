@@ -96,6 +96,16 @@ body {
   padding: 5px 12px;
 }
 
+.connection-pill.is-up {
+  color: hsl(152 75% 20%);
+  background: hsl(141 54% 78%);
+}
+
+.connection-pill.is-down {
+  color: hsl(3 66% 24%);
+  background: hsl(2 69% 81%);
+}
+
 .layout-grid {
   display: grid;
   grid-template-columns: 230px 1fr;
@@ -121,10 +131,15 @@ body {
 
 .menu-item {
   display: block;
+  width: 100%;
+  text-align: left;
   padding: 10px 16px;
   margin: 4px 0;
   color: hsl(39 16% 82%);
   text-decoration: none;
+  border-top: none;
+  border-right: none;
+  border-bottom: none;
   transition: all 160ms ease;
   border-left: 2px solid transparent;
   cursor: pointer;
@@ -140,8 +155,21 @@ body {
   background: hsl(37 11% 17% / 0.82);
 }
 
+.danger-item {
+  color: hsl(5 80% 73%);
+}
+
 .content {
   padding: 16px;
+}
+
+.error-banner {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid hsl(1 52% 52% / 0.6);
+  background: hsl(0 35% 20% / 0.55);
+  color: hsl(1 78% 83%);
 }
 
 .stats-grid {
@@ -249,6 +277,13 @@ h2 {
   color: hsl(34 53% 29%);
 }
 
+.status-stopped,
+.status-error,
+.status-unknown {
+  background: hsl(15 22% 78%);
+  color: hsl(16 25% 27%);
+}
+
 .project-actions {
   display: flex;
   gap: 8px;
@@ -290,6 +325,66 @@ h2 {
 .terminal p {
   margin: 0 0 7px;
   color: var(--log);
+}
+
+.auth-shell {
+  min-height: calc(100vh - 36px);
+  display: grid;
+  place-items: center;
+}
+
+.auth-card {
+  width: min(92vw, 420px);
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: hsl(36 9% 13% / 0.92);
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+
+.auth-card h1 {
+  margin: 0;
+  font-size: 1.8rem;
+}
+
+.auth-card p {
+  margin: 6px 0 14px;
+  color: var(--muted);
+}
+
+.auth-card label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.83rem;
+  color: hsl(40 21% 82%);
+}
+
+.auth-card input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid hsl(41 15% 36%);
+  background: hsl(37 10% 11%);
+  color: var(--text);
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-family: "JetBrains Mono", monospace;
+}
+
+.auth-btn {
+  width: 100%;
+  border: 1px solid hsl(43 76% 52%);
+  background: hsl(42 82% 57%);
+  color: hsl(43 34% 15%);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.error-text {
+  margin: 0 0 12px;
+  font-size: 0.86rem;
+  color: hsl(2 74% 80%);
 }
 
 @keyframes rise-in {

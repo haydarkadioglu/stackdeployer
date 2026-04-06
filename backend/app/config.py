@@ -1,3 +1,5 @@
+import base64
+import hashlib
 import posixpath
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -24,6 +26,8 @@ class Settings(BaseSettings):
     domain_base_domain: str = ""
     domain_default_a_target: str = "127.0.0.1"
     domain_default_cname_target: str = ""
+    secret_encryption_key: str = ""
+    env_file_name: str = ".env"
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -61,3 +65,11 @@ def get_allowed_project_roots() -> list[str]:
             roots.append(normalized)
 
     return roots or ["/srv/apps"]
+
+
+def get_secret_encryption_key() -> bytes:
+    from cryptography.fernet import Fernet
+
+    seed = settings.secret_encryption_key.strip() or settings.jwt_secret
+    digest = hashlib.sha256(seed.encode("utf-8")).digest()
+    return Fernet.generate_key() if not digest else base64.urlsafe_b64encode(digest)

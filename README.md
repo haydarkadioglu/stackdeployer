@@ -189,9 +189,11 @@ The installer will:
 - Keep backend bound to `127.0.0.1` and expose only via Nginx.
 - Complete admin bootstrap immediately after installation.
 - Replace any weak/default secrets before production traffic.
+- Set a dedicated `secret_encryption_key` in `backend/.env` so encrypted environment variables remain readable across restarts.
 - Login endpoint includes temporary lockout after repeated failed attempts.
 - Project `local_path` must stay under `allowed_project_roots` (`backend/.env`) and path traversal (`..`) is rejected.
 - Canonical path checks are applied so symlink-resolved paths that escape allowed roots are blocked.
+- Project environment variables are stored encrypted when marked secret and are rendered into the deployment `.env` file at deploy time.
 
 ## Panel Self Update (Git Pull)
 - You can trigger panel self-update from dashboard: `General Settings -> run self update`.

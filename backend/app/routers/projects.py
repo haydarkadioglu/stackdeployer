@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import base64
+import hashlib
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
@@ -10,6 +12,7 @@ import subprocess
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from cryptography.fernet import Fernet, InvalidToken
 
 from ..auth import require_admin
 from ..database import get_db
@@ -44,7 +47,7 @@ from ..schemas import (
 )
 from ..ssl_service import SSLService, SSLServiceError
 from ..config import settings
-from ..config import get_allowed_project_roots
+from ..config import get_allowed_project_roots, get_secret_encryption_key
 
 router = APIRouter(prefix="/api/v1/projects", tags=["projects"], dependencies=[Depends(require_admin)])
 executor = Executor()
@@ -55,6 +58,9 @@ FORBIDDEN_COMMAND_PATTERN = re.compile(r"[;&|`$><\r\n]")
 WINDOWS_DRIVE_PREFIX_PATTERN = re.compile(r"^[a-zA-Z]:")
 DOMAIN_PATTERN = re.compile(r"^(?!-)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
 BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]+$")
+SECRET_VALUE_PREFIX = "enc:v1:"
+SECRET_MASK = "********"
+_SECRET_FERNET = Fernet(get_secret_encryption_key())
 
 
 def _validate_service_constraints(service_type: str, internal_port: int | None, domain: str | None) -> None:
@@ -132,6 +138,52 @@ def _create_log(db: Session, project_id: int, level: str, source: str, message: 
     log = Log(project_id=project_id, level=level, source=source, message=message)
     db.add(log)
     db.commit()
+
+
+def _encrypt_secret_value(value: str) -> str:
+    token = _SECRET_FERNET.encrypt(value.encode("utf-8")).decode("utf-8")
+    return f"{SECRET_VALUE_PREFIX}{token}"
+
+
+def _decrypt_secret_value(value: str) -> str:
+    if not value.startswith(SECRET_VALUE_PREFIX):
+        return value
+
+    token = value.removeprefix(SECRET_VALUE_PREFIX)
+    try:
+        return _SECRET_FERNET.decrypt(token.encode("utf-8")).decode("utf-8")
+    except InvalidToken:
+        return value
+
+
+def _store_env_value(value: str, is_secret: bool) -> str:
+    return _encrypt_secret_value(value) if is_secret else _decrypt_secret_value(value)
+
+
+def _read_env_value(item: ProjectEnvironment, reveal_secrets: bool = False) -> str:
+    raw_value = _decrypt_secret_value(item.value) if item.is_secret else item.value
+    if reveal_secrets or not item.is_secret:
+        return raw_value
+    return SECRET_MASK
+
+
+def _format_env_line(key: str, value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n").replace('"', '\\"')
+    return f'{key}="{escaped}"'
+
+
+def _render_project_env_content(db: Session, project_id: int) -> str:
+    rows = (
+        db.execute(
+            select(ProjectEnvironment)
+            .where(ProjectEnvironment.project_id == project_id)
+            .order_by(ProjectEnvironment.key.asc())
+        )
+        .scalars()
+        .all()
+    )
+    lines = [_format_env_line(item.key, _decrypt_secret_value(item.value) if item.is_secret else item.value) for item in rows]
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def _next_available_port(db: Session, start_port: int = 8000) -> int:
@@ -254,6 +306,10 @@ def _default_domain_records(domain: str) -> list[DomainRecordIn]:
     ]
 
 
+def _preview_app_name(project: Project, branch: str) -> str:
+    return f"{project.name}-preview-{_safe_slug(branch)}"
+
+
 def _discover_paths(base_paths: list[str]) -> list[str]:
     discovered: list[str] = []
     for base in base_paths:
@@ -269,7 +325,7 @@ def _discover_paths(base_paths: list[str]) -> list[str]:
 
 
 def _to_env_out(item: ProjectEnvironment, reveal_secrets: bool = False) -> ProjectEnvironmentOut:
-    value = item.value if reveal_secrets or not item.is_secret else "********"
+    value = _read_env_value(item, reveal_secrets=reveal_secrets)
     return ProjectEnvironmentOut(
         id=item.id,
         project_id=item.project_id,
@@ -497,6 +553,45 @@ def list_project_deployments(
     return rows
 
 
+@router.delete("/{project_id}/deployments/{deployment_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_preview_deployment(project_id: int, deployment_id: int, db: Session = Depends(get_db)) -> Response:
+    project = _get_project_or_404(db, project_id)
+    deployment = db.get(Deployment, deployment_id)
+    if not deployment or deployment.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found")
+    if deployment.deployment_type != "preview":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only preview deployments can be removed")
+
+    try:
+        executor.pm2_delete(_preview_app_name(project, deployment.branch))
+    except ExecutorError:
+        # Preview cleanup should still delete the record even if PM2 cleanup already happened.
+        pass
+
+    db.delete(deployment)
+    db.commit()
+    _create_log(db, project_id, "INFO", "deployments", f"Preview deployment removed for branch {deployment.branch}")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{project_id}/deployments/{deployment_id}/promote", status_code=status.HTTP_202_ACCEPTED)
+def promote_preview_deployment(project_id: int, deployment_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
+    project = _get_project_or_404(db, project_id)
+    deployment = db.get(Deployment, deployment_id)
+    if not deployment or deployment.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Deployment not found")
+    if deployment.deployment_type != "preview":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only preview deployments can be promoted")
+
+    result = deploy_project(
+        project_id,
+        DeploymentRunRequest(branch=deployment.branch, deployment_type="production"),
+        db,
+    )
+    _create_log(db, project_id, "INFO", "deployments", f"Preview deployment promoted for branch {deployment.branch}")
+    return result
+
+
 @router.get("/{project_id}/env", response_model=list[ProjectEnvironmentOut])
 def list_project_environment(
     project_id: int,
@@ -514,7 +609,7 @@ def list_project_environment(
         .all()
     )
     if reveal_secrets and items:
-        _create_log(db, project_id, "INFO", "api", "Environment secrets viewed via API")
+        _create_log(db, project_id, "INFO", "api", f"Environment secrets viewed via API for {len(items)} keys")
     return [_to_env_out(item, reveal_secrets=reveal_secrets) for item in items]
 
 
@@ -542,7 +637,7 @@ def create_project_environment(
     item = ProjectEnvironment(
         project_id=project_id,
         key=key,
-        value=payload.value,
+        value=_store_env_value(payload.value, payload.is_secret),
         is_secret=payload.is_secret,
     )
     db.add(item)
@@ -563,10 +658,14 @@ def update_project_environment(
     if not item or item.project_id != project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Environment variable not found")
 
+    next_is_secret = item.is_secret if payload.is_secret is None else payload.is_secret
+    next_value = item.value
     if payload.value is not None:
-        item.value = payload.value
+        next_value = payload.value
     if payload.is_secret is not None:
         item.is_secret = payload.is_secret
+    item.value = _store_env_value(_decrypt_secret_value(next_value) if item.is_secret or next_is_secret else next_value, next_is_secret)
+    item.is_secret = next_is_secret
 
     db.add(item)
     db.commit()
@@ -655,6 +754,8 @@ def deploy_project(
         start_command=resolved_start_command,
         internal_port=resolved_port,
         service_type=project.service_type,
+        env_content=_render_project_env_content(db, project.id),
+        env_file_name=settings.env_file_name.strip() or ".env",
     )
 
     try:

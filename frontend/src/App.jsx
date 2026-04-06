@@ -7,6 +7,7 @@ import {
   createProject,
   createProjectEnvironment,
   deleteProjectEnvironment,
+  deleteProjectDeployment,
   deployProject,
   getProjectSSLStatus,
   getSystemInfo,
@@ -21,6 +22,7 @@ import {
   listProjectEnvironment,
   listProjects,
   login,
+  promoteProjectDeployment,
   removeNginxRoute,
   restartProject,
   runSelfUpdate,
@@ -639,6 +641,26 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
     setDeployments(await listProjectDeployments(token, projectId, 50, deploymentsFilter));
   }
 
+  async function handleRemovePreviewDeployment(item) {
+    try {
+      await deleteProjectDeployment(token, projectId, item.id);
+      setDeployments(await listProjectDeployments(token, projectId, 50, deploymentsFilter));
+      await refreshProjects();
+    } catch (err) {
+      setGlobalError(err.message || "Preview remove failed");
+    }
+  }
+
+  async function handlePromotePreviewDeployment(item) {
+    try {
+      await promoteProjectDeployment(token, projectId, item.id);
+      await reloadProjectAndList();
+      setDeployments(await listProjectDeployments(token, projectId, 50, deploymentsFilter));
+    } catch (err) {
+      setGlobalError(err.message || "Preview promote failed");
+    }
+  }
+
   async function handleCreateEnv(event) {
     event.preventDefault();
     try {
@@ -676,6 +698,18 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
       setEnvRows(await listProjectEnvironment(token, projectId, revealSecrets));
     } catch (err) {
       setGlobalError(err.message || "Env value save failed");
+    }
+  }
+
+  async function handleCopyEnvValue(row) {
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(row.value);
+        return;
+      }
+      setGlobalError("Clipboard access is not available in this browser");
+    } catch (err) {
+      setGlobalError(err.message || "Copy failed");
     }
   }
 
@@ -855,6 +889,37 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
                   </p>
                   {item.error_message ? <p className="error-text">{item.error_message}</p> : null}
                 </div>
+                <div className="project-actions">
+                  {item.deployment_type === "preview" ? (
+                    <>
+                      <button
+                        className="ghost-btn"
+                        type="button"
+                        onClick={() => handlePromotePreviewDeployment(item)}
+                        disabled={busyAction === `deploy:${project.id}`}
+                      >
+                        promote
+                      </button>
+                      <button
+                        className="ghost-btn"
+                        type="button"
+                        onClick={() => handleRemovePreviewDeployment(item)}
+                        disabled={busyAction === `deploy:${project.id}`}
+                      >
+                        remove
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      className="ghost-btn"
+                      type="button"
+                      onClick={() => handleHeaderAction("deploy")}
+                      disabled={busyAction === `deploy:${project.id}`}
+                    >
+                      retry deploy
+                    </button>
+                  )}
+                </div>
               </article>
             ))}
             {!deployments.length ? <div className="error-banner">No deployments yet.</div> : null}
@@ -912,6 +977,7 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
                     <h3>{row.key}</h3>
                     <StatusBadge status={row.is_secret ? "secret" : "plain"} />
                   </div>
+                  <div className="detail-meta">updated {formatTimestamp(row.updated_at)}</div>
                   {editingEnvId === row.id ? (
                     <input
                       value={editingEnvValue}
@@ -936,6 +1002,9 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
                       edit
                     </button>
                   )}
+                  <button className="ghost-btn" type="button" onClick={() => handleCopyEnvValue(row)} disabled={row.is_secret && !revealSecrets}>
+                    copy
+                  </button>
                   <button className="ghost-btn" type="button" onClick={() => handleToggleSecret(row)}>
                     toggle secret
                   </button>

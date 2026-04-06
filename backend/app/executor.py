@@ -32,6 +32,8 @@ class DeploymentPlan:
     start_command: str | None = None
     internal_port: int | None = None
     service_type: str = "web"
+    env_content: str | None = None
+    env_file_name: str = ".env"
 
 
 class Executor:
@@ -260,6 +262,11 @@ class Executor:
 
         stream(f"Preparing deployment for {plan.repo_url}")
         self.clone_or_update(plan.repo_url, plan.target_dir, plan.branch)
+
+        if plan.env_content:
+            env_path = Path(plan.target_dir) / plan.env_file_name
+            env_path.write_text(plan.env_content, encoding="utf-8")
+            stream(f"Environment file written: {env_path.name}")
 
         stack = plan.stack or self.detect_stack(plan.target_dir)
         stream(f"Detected stack: {stack}")

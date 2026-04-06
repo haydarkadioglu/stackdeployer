@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from app.database import SessionLocal
+from app.models import ProjectEnvironment
+
 
 def bootstrap_admin(client) -> None:
     response = client.post(
@@ -293,7 +296,99 @@ def test_env_reveal_secrets_creates_audit_log(client) -> None:
     logs_response = client.get(f"/api/v1/projects/{project_id}/logs", headers=headers)
     assert logs_response.status_code == 200, logs_response.text
     messages = [item["message"] for item in logs_response.json()]
-    assert "Environment secrets viewed via API" in messages
+    assert any(message.startswith("Environment secrets viewed via API") for message in messages)
+
+
+def test_secret_env_values_are_encrypted_at_rest(client) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    create_project_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "env-encryption-check",
+            "git_url": "https://example.com/env-encryption-check.git",
+            "local_path": "/srv/apps/env-encryption-check",
+            "tech_stack": "python",
+            "internal_port": 8088,
+            "start_command": "uvicorn app.main:app --host 0.0.0.0 --port 8088",
+        },
+    )
+    assert create_project_response.status_code == 201, create_project_response.text
+    project_id = create_project_response.json()["id"]
+
+    create_env_response = client.post(
+        f"/api/v1/projects/{project_id}/env",
+        headers=headers,
+        json={"key": "SECRET_TOKEN", "value": "super-secret", "is_secret": True},
+    )
+    assert create_env_response.status_code == 201, create_env_response.text
+
+    with SessionLocal() as db:
+        item = db.query(ProjectEnvironment).filter(ProjectEnvironment.project_id == project_id).one()
+        assert item.value != "super-secret"
+        assert item.value.startswith("enc:v1:")
+
+    reveal_response = client.get(
+        f"/api/v1/projects/{project_id}/env?reveal_secrets=true",
+        headers=headers,
+    )
+    assert reveal_response.status_code == 200, reveal_response.text
+    assert reveal_response.json()[0]["value"] == "super-secret"
+
+
+def test_deploy_renders_env_file_content(client, monkeypatch) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    create_project_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "env-deploy-check",
+            "git_url": "https://example.com/env-deploy-check.git",
+            "local_path": "/srv/apps/env-deploy-check",
+            "tech_stack": "python",
+            "internal_port": 8089,
+            "start_command": "uvicorn app.main:app --host 0.0.0.0 --port 8089",
+        },
+    )
+    assert create_project_response.status_code == 201, create_project_response.text
+    project_id = create_project_response.json()["id"]
+
+    client.post(
+        f"/api/v1/projects/{project_id}/env",
+        headers=headers,
+        json={"key": "PLAIN_TOKEN", "value": "plain-value", "is_secret": False},
+    )
+    client.post(
+        f"/api/v1/projects/{project_id}/env",
+        headers=headers,
+        json={"key": "SECRET_TOKEN", "value": "super-secret", "is_secret": True},
+    )
+
+    from app.routers import projects as projects_router
+
+    captured = {}
+
+    def fake_deploy(plan, stream=None):
+        captured["env_content"] = plan.env_content
+        captured["env_file_name"] = plan.env_file_name
+
+    monkeypatch.setattr(projects_router.executor, "deploy", fake_deploy)
+
+    deploy_response = client.post(
+        f"/api/v1/projects/{project_id}/deploy",
+        headers=headers,
+        json={"branch": "main", "deployment_type": "production"},
+    )
+    assert deploy_response.status_code == 202, deploy_response.text
+    assert captured["env_file_name"] == ".env"
+    assert 'PLAIN_TOKEN="plain-value"' in captured["env_content"]
+    assert 'SECRET_TOKEN="super-secret"' in captured["env_content"]
 
 
 def test_user_can_change_username_and_password(client) -> None:
@@ -577,3 +672,100 @@ def test_preview_deployment_and_type_filter(client, monkeypatch) -> None:
     assert len(rows) >= 1
     assert rows[0]["deployment_type"] == "preview"
     assert rows[0]["branch"] == "feature/pr-123"
+
+
+def test_preview_deployment_remove_endpoint(client, monkeypatch) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    create_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "preview-remove-project",
+            "git_url": "https://example.com/preview-remove-project.git",
+            "local_path": "/srv/apps/preview-remove-project",
+            "tech_stack": "node",
+            "internal_port": 8094,
+            "start_command": "npm start",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    project_id = create_response.json()["id"]
+
+    from app.routers import projects as projects_router
+
+    monkeypatch.setattr(projects_router.executor, "deploy", lambda plan, stream=None: None)
+    monkeypatch.setattr(projects_router.executor, "pm2_delete", lambda app_name: None)
+
+    deploy_response = client.post(
+        f"/api/v1/projects/{project_id}/deploy",
+        headers=headers,
+        json={"branch": "feature/remove-me", "deployment_type": "preview"},
+    )
+    assert deploy_response.status_code == 202, deploy_response.text
+
+    preview_rows = client.get(
+        f"/api/v1/projects/{project_id}/deployments?deployment_type=preview",
+        headers=headers,
+    ).json()
+    deployment_id = preview_rows[0]["id"]
+
+    remove_response = client.delete(f"/api/v1/projects/{project_id}/deployments/{deployment_id}", headers=headers)
+    assert remove_response.status_code == 204, remove_response.text
+
+    preview_after = client.get(
+        f"/api/v1/projects/{project_id}/deployments?deployment_type=preview",
+        headers=headers,
+    )
+    assert preview_after.status_code == 200, preview_after.text
+    assert preview_after.json() == []
+
+
+def test_preview_deployment_promote_endpoint_creates_production_deploy(client, monkeypatch) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    create_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "preview-promote-project",
+            "git_url": "https://example.com/preview-promote-project.git",
+            "local_path": "/srv/apps/preview-promote-project",
+            "tech_stack": "node",
+            "internal_port": 8095,
+            "start_command": "npm start",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    project_id = create_response.json()["id"]
+
+    from app.routers import projects as projects_router
+
+    monkeypatch.setattr(projects_router.executor, "deploy", lambda plan, stream=None: None)
+
+    deploy_response = client.post(
+        f"/api/v1/projects/{project_id}/deploy",
+        headers=headers,
+        json={"branch": "feature/promote-me", "deployment_type": "preview"},
+    )
+    assert deploy_response.status_code == 202, deploy_response.text
+
+    preview_rows = client.get(
+        f"/api/v1/projects/{project_id}/deployments?deployment_type=preview",
+        headers=headers,
+    ).json()
+    deployment_id = preview_rows[0]["id"]
+
+    promote_response = client.post(f"/api/v1/projects/{project_id}/deployments/{deployment_id}/promote", headers=headers)
+    assert promote_response.status_code == 202, promote_response.text
+
+    production_rows = client.get(
+        f"/api/v1/projects/{project_id}/deployments?deployment_type=production",
+        headers=headers,
+    )
+    assert production_rows.status_code == 200, production_rows.text
+    assert len(production_rows.json()) == 1

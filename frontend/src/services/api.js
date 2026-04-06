@@ -101,6 +101,20 @@ export async function listProjectDeployments(token, projectId, limit = 50, deplo
   return request(`/api/v1/projects/${projectId}/deployments?${query.toString()}`, { token });
 }
 
+export async function deleteProjectDeployment(token, projectId, deploymentId) {
+  return request(`/api/v1/projects/${projectId}/deployments/${deploymentId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export async function promoteProjectDeployment(token, projectId, deploymentId) {
+  return request(`/api/v1/projects/${projectId}/deployments/${deploymentId}/promote`, {
+    method: "POST",
+    token,
+  });
+}
+
 export async function listProjectEnvironment(token, projectId, revealSecrets = false) {
   return request(`/api/v1/projects/${projectId}/env?reveal_secrets=${revealSecrets}`, { token });
 }

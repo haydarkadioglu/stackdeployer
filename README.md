@@ -2,6 +2,87 @@
 
 StackDeployer is a self-hosted control plane for deploying multiple projects (FastAPI, Node.js, mixed stacks) on a single VPS.
 
+## Start Here: Import, Run, and Publish
+
+### 1. Import the repository
+1. Create an empty repository in your Git provider.
+2. Push this project to that repository, or clone directly if already hosted.
+3. On your VPS (or local machine for development), clone it:
+
+```bash
+git clone https://github.com/haydarkadioglu/stackdeployer
+cd stackdeployer
+```
+
+### 2. Bring up StackDeployer on a VPS (recommended)
+1. Use Ubuntu or Debian with a sudo-enabled user.
+2. Run installer from project root:
+
+```bash
+sudo bash install.sh
+```
+
+3. Check service health:
+
+```bash
+sudo systemctl status stackdeployer
+curl http://127.0.0.1:8001/api/v1/health
+```
+
+### 3. Bootstrap first admin
+Run once after first install:
+
+```bash
+curl -X POST http://127.0.0.1:8001/api/v1/auth/bootstrap \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"CHANGE_ME_STRONG_PASSWORD"}'
+```
+
+### 4. Login and get API token
+Use this token for project operations (deploy, restart, domain mapping):
+
+```bash
+curl -X POST http://127.0.0.1:8001/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"CHANGE_ME_STRONG_PASSWORD"}'
+```
+
+### 5. Configure custom domain or subdomain
+1. In DNS, create an `A` record that points to your VPS IP.
+   - Example root domain: `example.com -> <VPS_IP>`
+   - Example subdomain: `app.example.com -> <VPS_IP>`
+2. Create your project in StackDeployer (API or UI).
+3. Apply Nginx route for that project:
+
+```bash
+curl -X POST http://127.0.0.1:8001/api/v1/projects/<PROJECT_ID>/nginx/apply \
+  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"site_name":"myapp","domain":"app.example.com"}'
+```
+
+4. Verify route is active:
+
+```bash
+curl -I http://app.example.com
+```
+
+### 6. Enable SSL for domain/subdomain (Certbot)
+After DNS propagation and successful HTTP routing:
+
+```bash
+sudo certbot --nginx -d app.example.com
+```
+
+For root + www:
+
+```bash
+sudo certbot --nginx -d example.com -d www.example.com
+```
+
+### 7. Optional local development flow
+Run backend and frontend manually if you are not using the VPS installer.
+
 ## Current Backend Capabilities
 - Project CRUD API
 - JWT auth (`bootstrap`, `login`, `me`)

@@ -95,4 +95,33 @@ export async function restartProject(token, projectId) {
   });
 }
 
+export async function startProject(token, projectId) {
+  return request(`/api/v1/projects/${projectId}/start`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function stopProject(token, projectId) {
+  return request(`/api/v1/projects/${projectId}/stop`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function applyNginxRoute(token, projectId, payload) {
+  return request(`/api/v1/projects/${projectId}/nginx/apply`, {
+    method: "POST",
+    token,
+    body: payload,
+  });
+}
+
+export async function removeNginxRoute(token, projectId, siteName) {
+  return request(`/api/v1/projects/${projectId}/nginx/${encodeURIComponent(siteName)}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
 export { API_BASE_URL };

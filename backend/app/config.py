@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     self_update_repo_root: str = "/opt/stackdeployer"
     self_update_default_branch: str = "main"
     self_update_service_name: str = "stackdeployer"
+    domain_auto_enabled: bool = True
+    domain_base_domain: str = ""
+    domain_default_a_target: str = "127.0.0.1"
+    domain_default_cname_target: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

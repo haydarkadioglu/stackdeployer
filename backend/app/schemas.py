@@ -194,3 +194,54 @@ class SelfUpdateResultOut(BaseModel):
     branch: str
     restart_required: bool
     steps: list[CommandResultOut]
+
+
+class DomainRecordIn(BaseModel):
+    record_type: Literal["A", "CNAME"]
+    host: str = Field(min_length=1, max_length=255)
+    value: str = Field(min_length=1, max_length=255)
+    ttl: int = Field(default=300, ge=60, le=86400)
+
+
+class DomainRecordOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    record_type: Literal["A", "CNAME"]
+    host: str
+    value: str
+    ttl: int
+    is_verified: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class DomainPlanOut(BaseModel):
+    mode: Literal["auto", "custom"]
+    domain: str
+    records: list[DomainRecordIn]
+
+
+class DomainRecordsUpsertRequest(BaseModel):
+    domain: str = Field(min_length=4, max_length=255)
+    records: list[DomainRecordIn] = Field(default_factory=list)
+
+
+class DomainRecordsOut(BaseModel):
+    domain: str | None
+    records: list[DomainRecordOut]
+
+
+class DomainValidationRecordOut(BaseModel):
+    record_type: Literal["A", "CNAME"]
+    fqdn: str
+    expected: str
+    actual_values: list[str]
+    matched: bool
+
+
+class DomainValidationOut(BaseModel):
+    domain: str
+    all_matched: bool
+    records: list[DomainValidationRecordOut]

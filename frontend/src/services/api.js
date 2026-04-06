@@ -191,6 +191,33 @@ export async function removeNginxRoute(token, projectId, siteName) {
   });
 }
 
+export async function getDomainPlan(token, projectId, mode, domain) {
+  const query = new URLSearchParams({ mode });
+  if (domain) {
+    query.set("domain", domain);
+  }
+  return request(`/api/v1/projects/${projectId}/domain/plan?${query.toString()}`, { token });
+}
+
+export async function listDomainRecords(token, projectId) {
+  return request(`/api/v1/projects/${projectId}/domain/records`, { token });
+}
+
+export async function saveDomainRecords(token, projectId, payload) {
+  return request(`/api/v1/projects/${projectId}/domain/records`, {
+    method: "PUT",
+    token,
+    body: payload,
+  });
+}
+
+export async function validateDomainRecords(token, projectId) {
+  return request(`/api/v1/projects/${projectId}/domain/validate`, {
+    method: "POST",
+    token,
+  });
+}
+
 export async function runSelfUpdate(token, payload) {
   return request("/api/v1/system/self-update", {
     method: "POST",

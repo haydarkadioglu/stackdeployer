@@ -9,9 +9,11 @@ import {
   deleteProjectEnvironment,
   deployProject,
   getMe,
+  getDomainPlan,
   getNextPort,
   getProject,
   getProjectLogs,
+  listDomainRecords,
   listImportPaths,
   listProjectDeployments,
   listProjectEnvironment,
@@ -20,11 +22,13 @@ import {
   removeNginxRoute,
   restartProject,
   runSelfUpdate,
+  saveDomainRecords,
   startProject,
   stopProject,
   updateMeCredentials,
   updateProject,
   updateProjectEnvironment,
+  validateDomainRecords,
 } from "./services/api";
 import { createProjectLogsSocket } from "./services/ws";
 
@@ -442,6 +446,9 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
   const [editingEnvValue, setEditingEnvValue] = useState("");
   const [envForm, setEnvForm] = useState({ key: "", value: "", is_secret: false });
   const [domainForm, setDomainForm] = useState({ site_name: "", domain: "" });
+  const [domainMode, setDomainMode] = useState("auto");
+  const [dnsRecords, setDnsRecords] = useState([]);
+  const [domainValidation, setDomainValidation] = useState(null);
   const [settingsForm, setSettingsForm] = useState({
     name: "",
     tech_stack: "",
@@ -517,6 +524,9 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
           setDeployments(await listProjectDeployments(token, projectId, 50));
         } else if (tab === "env") {
           setEnvRows(await listProjectEnvironment(token, projectId, revealSecrets));
+        } else if (tab === "domain") {
+          const recordsPayload = await listDomainRecords(token, projectId);
+          setDnsRecords(recordsPayload?.records || []);
         } else if (tab === "settings") {
           const next = await getNextPort(token, 8000);
           setNextPort(next?.next_port || null);
@@ -631,6 +641,59 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
       setEnvRows(await listProjectEnvironment(token, projectId, revealSecrets));
     } catch (err) {
       setGlobalError(err.message || "Env value save failed");
+    }
+  }
+
+  function handleDnsRecordChange(index, key, value) {
+    setDnsRecords((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)));
+  }
+
+  function addDnsRecord() {
+    setDnsRecords((prev) => [...prev, { record_type: "A", host: "@", value: "", ttl: 300 }]);
+  }
+
+  function removeDnsRecord(index) {
+    setDnsRecords((prev) => prev.filter((_, rowIndex) => rowIndex !== index));
+  }
+
+  async function handleGenerateDomainPlan() {
+    try {
+      const plan = await getDomainPlan(token, projectId, domainMode, domainForm.domain.trim() || undefined);
+      setDomainForm((prev) => ({ ...prev, domain: plan.domain }));
+      setDnsRecords(plan.records || []);
+      setDomainValidation(null);
+    } catch (err) {
+      setGlobalError(err.message || "Domain plan generation failed");
+    }
+  }
+
+  async function handleSaveDomainRecords() {
+    try {
+      const payload = await saveDomainRecords(token, projectId, {
+        domain: domainForm.domain.trim(),
+        records: dnsRecords.map((row) => ({
+          record_type: row.record_type,
+          host: (row.host || "").trim(),
+          value: (row.value || "").trim(),
+          ttl: Number(row.ttl || 300),
+        })),
+      });
+      setDnsRecords(payload?.records || []);
+      setDomainValidation(null);
+      await reloadProjectAndList();
+    } catch (err) {
+      setGlobalError(err.message || "Saving domain records failed");
+    }
+  }
+
+  async function handleValidateDomainRecords() {
+    try {
+      const result = await validateDomainRecords(token, projectId);
+      setDomainValidation(result);
+      const refreshed = await listDomainRecords(token, projectId);
+      setDnsRecords(refreshed?.records || []);
+    } catch (err) {
+      setGlobalError(err.message || "Domain validation failed");
     }
   }
 
@@ -835,6 +898,89 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
           {!domainValid && domainForm.domain ? (
             <div className="error-banner">Domain format looks invalid. Example: api.example.com</div>
           ) : null}
+          <form className="project-form" onSubmit={(event) => event.preventDefault()}>
+            <select value={domainMode} onChange={(event) => setDomainMode(event.target.value)}>
+              <option value="auto">auto domain</option>
+              <option value="custom">custom domain</option>
+            </select>
+            <input
+              placeholder="domain"
+              value={domainForm.domain}
+              onChange={(event) => setDomainForm((prev) => ({ ...prev, domain: event.target.value }))}
+              required={domainMode === "custom"}
+            />
+            <button type="button" className="ghost-btn" onClick={handleGenerateDomainPlan} disabled={project.service_type !== "web"}>
+              generate dns plan
+            </button>
+            <button type="button" className="ghost-btn" onClick={addDnsRecord} disabled={project.service_type !== "web"}>
+              add dns record
+            </button>
+          </form>
+
+          {dnsRecords.length ? (
+            <div className="project-list" style={{ marginBottom: 12 }}>
+              {dnsRecords.map((row, index) => (
+                <article key={`${row.id || "new"}-${index}`} className="project-row">
+                  <div className="project-main">
+                    <div className="project-title-wrap">
+                      <h3>dns record #{index + 1}</h3>
+                      <StatusBadge status={row.is_verified ? "running" : "unknown"} />
+                    </div>
+                    <div className="project-form" style={{ marginTop: 8, marginBottom: 0, padding: 0, border: "none", background: "transparent" }}>
+                      <select value={row.record_type} onChange={(event) => handleDnsRecordChange(index, "record_type", event.target.value)}>
+                        <option value="A">A</option>
+                        <option value="CNAME">CNAME</option>
+                      </select>
+                      <input
+                        placeholder="name/host (example: @, www)"
+                        value={row.host || ""}
+                        onChange={(event) => handleDnsRecordChange(index, "host", event.target.value)}
+                      />
+                      <input
+                        placeholder="value/target"
+                        value={row.value || ""}
+                        onChange={(event) => handleDnsRecordChange(index, "value", event.target.value)}
+                      />
+                      <input
+                        placeholder="ttl"
+                        type="number"
+                        min="60"
+                        max="86400"
+                        value={row.ttl || 300}
+                        onChange={(event) => handleDnsRecordChange(index, "ttl", event.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="project-actions">
+                    <button className="ghost-btn" type="button" onClick={() => removeDnsRecord(index)}>
+                      remove
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="project-actions" style={{ marginBottom: 12 }}>
+            <button type="button" className="ghost-btn" onClick={handleSaveDomainRecords} disabled={project.service_type !== "web" || !domainValid}>
+              save dns records
+            </button>
+            <button type="button" className="ghost-btn" onClick={handleValidateDomainRecords} disabled={project.service_type !== "web" || !domainValid}>
+              validate dns
+            </button>
+          </div>
+
+          {domainValidation ? (
+            <div className="terminal" style={{ marginBottom: 12 }}>
+              <p>[domain validation] {domainValidation.all_matched ? "all records matched" : "some records mismatched"}</p>
+              {(domainValidation.records || []).map((row) => (
+                <p key={`${row.record_type}-${row.fqdn}-${row.expected}`}>
+                  {row.record_type} {row.fqdn} expected={row.expected} actual=[{(row.actual_values || []).join(", ") || "none"}] matched={String(row.matched)}
+                </p>
+              ))}
+            </div>
+          ) : null}
+
           <form className="project-form" onSubmit={handleApplyDomain}>
             <input
               placeholder="site name"

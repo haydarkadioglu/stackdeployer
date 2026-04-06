@@ -394,3 +394,89 @@ def test_self_update_endpoint_runs_git_pull_flow(client, monkeypatch, tmp_path) 
     assert calls[0][0] == ["git", "fetch", "origin"]
     assert calls[1][0] == ["git", "checkout", "main"]
     assert calls[2][0] == ["git", "pull", "--ff-only", "origin", "main"]
+
+
+def test_create_project_assigns_auto_domain(client, monkeypatch) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    from app import config as app_config
+
+    monkeypatch.setattr(app_config.settings, "domain_auto_enabled", True)
+    monkeypatch.setattr(app_config.settings, "domain_base_domain", "apps.example.com")
+
+    response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "auto-domain-project",
+            "git_url": "https://example.com/auto-domain-project.git",
+            "local_path": "/srv/apps/auto-domain-project",
+            "tech_stack": "node",
+            "internal_port": 8090,
+            "start_command": "npm start",
+        },
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["domain"] == "auto-domain-project.apps.example.com"
+
+
+def test_custom_domain_records_and_validation_flow(client, monkeypatch) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    create_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "domain-wizard",
+            "git_url": "https://example.com/domain-wizard.git",
+            "local_path": "/srv/apps/domain-wizard",
+            "tech_stack": "node",
+            "internal_port": 8091,
+            "start_command": "npm start",
+            "domain": "app.example.com",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    project_id = create_response.json()["id"]
+
+    plan_response = client.get(
+        f"/api/v1/projects/{project_id}/domain/plan?mode=custom&domain=app.example.com",
+        headers=headers,
+    )
+    assert plan_response.status_code == 200, plan_response.text
+    planned_records = plan_response.json()["records"]
+    assert len(planned_records) >= 2
+
+    save_response = client.put(
+        f"/api/v1/projects/{project_id}/domain/records",
+        headers=headers,
+        json={
+            "domain": "app.example.com",
+            "records": [
+                {"record_type": "A", "host": "@", "value": "203.0.113.10", "ttl": 300},
+                {"record_type": "CNAME", "host": "www", "value": "app.example.com", "ttl": 300},
+            ],
+        },
+    )
+    assert save_response.status_code == 200, save_response.text
+    assert save_response.json()["domain"] == "app.example.com"
+    assert len(save_response.json()["records"]) == 2
+
+    from app.routers import projects as projects_router
+
+    def fake_resolver(record_type: str, fqdn: str) -> list[str]:
+        if record_type == "A" and fqdn == "app.example.com":
+            return ["203.0.113.10"]
+        if record_type == "CNAME" and fqdn == "www.app.example.com":
+            return ["app.example.com"]
+        return []
+
+    monkeypatch.setattr(projects_router, "_resolve_dns_values", fake_resolver)
+
+    validate_response = client.post(f"/api/v1/projects/{project_id}/domain/validate", headers=headers)
+    assert validate_response.status_code == 200, validate_response.text
+    assert validate_response.json()["all_matched"] is True

@@ -36,6 +36,9 @@ class Project(Base):
     environment_variables: Mapped[list["ProjectEnvironment"]] = relationship(
         "ProjectEnvironment", back_populates="project", cascade="all, delete-orphan"
     )
+    domain_records: Mapped[list["ProjectDomainRecord"]] = relationship(
+        "ProjectDomainRecord", back_populates="project", cascade="all, delete-orphan"
+    )
 
 
 class Log(Base):
@@ -113,3 +116,26 @@ class ProjectEnvironment(Base):
     )
 
     project: Mapped["Project"] = relationship("Project", back_populates="environment_variables")
+
+
+class ProjectDomainRecord(Base):
+    __tablename__ = "project_domain_records"
+    __table_args__ = (
+        UniqueConstraint("project_id", "record_type", "host", name="uq_project_domain_records_project_type_host"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    record_type: Mapped[str] = mapped_column(String(8), nullable=False)
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    value: Mapped[str] = mapped_column(String(255), nullable=False)
+    ttl: Mapped[int] = mapped_column(Integer, nullable=False, default=300)
+    is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    project: Mapped["Project"] = relationship("Project", back_populates="domain_records")

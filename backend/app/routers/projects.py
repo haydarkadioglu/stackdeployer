@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 import posixpath
 import re
+import socket
+import subprocess
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
@@ -12,12 +14,18 @@ from sqlalchemy.orm import Session
 from ..auth import require_admin
 from ..database import get_db
 from ..executor import DeploymentPlan, Executor, ExecutorError
-from ..models import Deployment, Log, Project, ProjectEnvironment
+from ..models import Deployment, Log, Project, ProjectDomainRecord, ProjectEnvironment
 from ..nginx_config import NginxConfigError, NginxManager, NginxSiteConfig
 from ..schemas import (
     CommandResultOut,
     DeploymentOut,
     ImportPathsOut,
+    DomainPlanOut,
+    DomainRecordIn,
+    DomainRecordsOut,
+    DomainRecordsUpsertRequest,
+    DomainValidationOut,
+    DomainValidationRecordOut,
     LogOut,
     NginxApplyRequest,
     NextPortOut,
@@ -43,6 +51,7 @@ ssl_service = SSLService()
 DEFAULT_IMPORT_BASE_PATHS = ["/srv/apps", "/opt/apps", "/home/ubuntu/apps"]
 FORBIDDEN_COMMAND_PATTERN = re.compile(r"[;&|`$><\r\n]")
 WINDOWS_DRIVE_PREFIX_PATTERN = re.compile(r"^[a-zA-Z]:")
+DOMAIN_PATTERN = re.compile(r"^(?!-)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
 
 
 def _validate_service_constraints(service_type: str, internal_port: int | None, domain: str | None) -> None:
@@ -145,6 +154,81 @@ def _safe_slug_from_git_url(git_url: str) -> str:
         leaf = leaf[:-4]
     leaf = re.sub(r"[^a-zA-Z0-9._-]", "-", leaf).strip("-")
     return leaf or "new-project"
+
+
+def _safe_slug(value: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9-]", "-", value.strip().lower())
+    slug = re.sub(r"-+", "-", slug).strip("-")
+    return slug or "project"
+
+
+def _is_valid_domain(value: str) -> bool:
+    return bool(DOMAIN_PATTERN.match(value.strip()))
+
+
+def _build_fqdn(domain: str, host: str) -> str:
+    normalized_domain = domain.strip().rstrip(".").lower()
+    normalized_host = host.strip().rstrip(".").lower()
+    if normalized_host in {"@", ""}:
+        return normalized_domain
+    if normalized_host.endswith(normalized_domain):
+        return normalized_host
+    return f"{normalized_host}.{normalized_domain}"
+
+
+def _resolve_dns_values(record_type: str, fqdn: str) -> list[str]:
+    if record_type == "A":
+        try:
+            _host, _aliases, ips = socket.gethostbyname_ex(fqdn)
+            return sorted(set(ips))
+        except socket.gaierror:
+            return []
+
+    if record_type == "CNAME":
+        try:
+            result = subprocess.run(
+                ["nslookup", "-type=CNAME", fqdn],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            lines = [line.strip() for line in (result.stdout + "\n" + result.stderr).splitlines()]
+            values: list[str] = []
+            for line in lines:
+                match = re.search(r"canonical name\s*=\s*(.+)$", line, re.IGNORECASE)
+                if match:
+                    values.append(match.group(1).strip().rstrip(".").lower())
+            return sorted(set(values))
+        except OSError:
+            return []
+
+    return []
+
+
+def _generate_auto_domain(db: Session, project_name: str) -> str:
+    if not settings.domain_auto_enabled:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="auto domain is disabled")
+    base_domain = settings.domain_base_domain.strip().lower()
+    if not base_domain or not _is_valid_domain(base_domain):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="domain_base_domain is not configured")
+
+    slug = _safe_slug(project_name)
+    candidate = f"{slug}.{base_domain}"
+    counter = 2
+    existing_domains = set(db.execute(select(Project.domain).where(Project.domain.is_not(None))).scalars().all())
+    while candidate in existing_domains:
+        candidate = f"{slug}-{counter}.{base_domain}"
+        counter += 1
+    return candidate
+
+
+def _default_domain_records(domain: str) -> list[DomainRecordIn]:
+    a_target = settings.domain_default_a_target.strip() or "127.0.0.1"
+    cname_target = settings.domain_default_cname_target.strip() or domain
+    return [
+        DomainRecordIn(record_type="A", host="@", value=a_target, ttl=300),
+        DomainRecordIn(record_type="CNAME", host="www", value=cname_target, ttl=300),
+    ]
 
 
 def _discover_paths(base_paths: list[str]) -> list[str]:
@@ -263,10 +347,17 @@ def analyze_project_import(payload: ProjectImportAnalyzeRequest, db: Session = D
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Project:
+    resolved_domain = payload.domain
+    if payload.service_type == "web" and not resolved_domain and settings.domain_auto_enabled:
+        base_domain = settings.domain_base_domain.strip().lower()
+        if base_domain and _is_valid_domain(base_domain):
+            resolved_domain = _generate_auto_domain(db, payload.name)
+
     resolved_port = payload.internal_port or _next_available_port(db, 8000)
-    _validate_service_constraints(payload.service_type, resolved_port, payload.domain)
+    _validate_service_constraints(payload.service_type, resolved_port, resolved_domain)
     project_data = payload.model_dump()
     project_data["internal_port"] = resolved_port
+    project_data["domain"] = resolved_domain
 
     project_data["local_path"] = _validate_local_path(project_data["local_path"])
     _validate_command(project_data.get("build_command"), "build_command")
@@ -566,6 +657,152 @@ def project_status(project_id: int, db: Session = Depends(get_db)) -> CommandRes
         return CommandResultOut(**result.__dict__)
     except ExecutorError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/{project_id}/domain/plan", response_model=DomainPlanOut)
+def plan_domain(
+    project_id: int,
+    mode: str = "auto",
+    domain: str | None = None,
+    db: Session = Depends(get_db),
+) -> DomainPlanOut:
+    project = _get_project_or_404(db, project_id)
+    if project.service_type != "web":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="domain is only available for web services")
+
+    normalized_mode = mode.strip().lower()
+    if normalized_mode not in {"auto", "custom"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="mode must be auto or custom")
+
+    resolved_domain = (domain or "").strip().lower()
+    if normalized_mode == "auto":
+        resolved_domain = _generate_auto_domain(db, project.name)
+    elif not resolved_domain:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="domain is required for custom mode")
+
+    if not _is_valid_domain(resolved_domain):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="domain format is invalid")
+
+    return DomainPlanOut(mode=normalized_mode, domain=resolved_domain, records=_default_domain_records(resolved_domain))
+
+
+@router.get("/{project_id}/domain/records", response_model=DomainRecordsOut)
+def list_domain_records(project_id: int, db: Session = Depends(get_db)) -> DomainRecordsOut:
+    project = _get_project_or_404(db, project_id)
+    rows = (
+        db.execute(
+            select(ProjectDomainRecord)
+            .where(ProjectDomainRecord.project_id == project_id)
+            .order_by(ProjectDomainRecord.record_type.asc(), ProjectDomainRecord.host.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return DomainRecordsOut(domain=project.domain, records=rows)
+
+
+@router.put("/{project_id}/domain/records", response_model=DomainRecordsOut)
+def upsert_domain_records(
+    project_id: int,
+    payload: DomainRecordsUpsertRequest,
+    db: Session = Depends(get_db),
+) -> DomainRecordsOut:
+    project = _get_project_or_404(db, project_id)
+    if project.service_type != "web":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="domain is only available for web services")
+
+    normalized_domain = payload.domain.strip().lower()
+    if not _is_valid_domain(normalized_domain):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="domain format is invalid")
+
+    if not payload.records:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="at least one DNS record is required")
+
+    seen: set[tuple[str, str]] = set()
+    for record in payload.records:
+        host = record.host.strip().lower()
+        if not host:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="record host cannot be empty")
+        if not record.value.strip():
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="record value cannot be empty")
+        key = (record.record_type, host)
+        if key in seen:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="duplicate DNS record type+host")
+        seen.add(key)
+
+    existing = db.execute(select(ProjectDomainRecord).where(ProjectDomainRecord.project_id == project_id)).scalars().all()
+    for row in existing:
+        db.delete(row)
+
+    for record in payload.records:
+        db.add(
+            ProjectDomainRecord(
+                project_id=project_id,
+                record_type=record.record_type,
+                host=record.host.strip().lower(),
+                value=record.value.strip().lower(),
+                ttl=record.ttl,
+                is_verified=False,
+            )
+        )
+
+    project.domain = normalized_domain
+    db.add(project)
+    db.commit()
+
+    rows = (
+        db.execute(
+            select(ProjectDomainRecord)
+            .where(ProjectDomainRecord.project_id == project_id)
+            .order_by(ProjectDomainRecord.record_type.asc(), ProjectDomainRecord.host.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return DomainRecordsOut(domain=project.domain, records=rows)
+
+
+@router.post("/{project_id}/domain/validate", response_model=DomainValidationOut)
+def validate_domain_records(project_id: int, db: Session = Depends(get_db)) -> DomainValidationOut:
+    project = _get_project_or_404(db, project_id)
+    if not project.domain:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="project domain is not set")
+
+    rows = (
+        db.execute(
+            select(ProjectDomainRecord)
+            .where(ProjectDomainRecord.project_id == project_id)
+            .order_by(ProjectDomainRecord.record_type.asc(), ProjectDomainRecord.host.asc())
+        )
+        .scalars()
+        .all()
+    )
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="no DNS records configured")
+
+    items: list[DomainValidationRecordOut] = []
+    all_matched = True
+    for row in rows:
+        fqdn = _build_fqdn(project.domain, row.host)
+        actual_values = _resolve_dns_values(row.record_type, fqdn)
+        expected = row.value.strip().lower().rstrip(".")
+        matched = expected in {item.strip().lower().rstrip(".") for item in actual_values}
+        if not matched:
+            all_matched = False
+        row.is_verified = matched
+        db.add(row)
+        items.append(
+            DomainValidationRecordOut(
+                record_type=row.record_type,
+                fqdn=fqdn,
+                expected=expected,
+                actual_values=actual_values,
+                matched=matched,
+            )
+        )
+
+    db.commit()
+    return DomainValidationOut(domain=project.domain, all_matched=all_matched, records=items)
 
 
 @router.post("/{project_id}/nginx/apply")

@@ -17,8 +17,8 @@ class ProjectCreate(BaseModel):
 
     @model_validator(mode="after")
     def validate_service_shape(self) -> "ProjectCreate":
-        if self.service_type == "web" and self.internal_port is None:
-            raise ValueError("internal_port is required for web services")
+        if self.service_type == "worker" and self.domain:
+            raise ValueError("domain is not supported for worker services")
         return self
 
 
@@ -61,6 +61,46 @@ class LogOut(BaseModel):
     source: str
     message: str
     created_at: datetime
+
+
+class DeploymentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    status: str
+    branch: str
+    error_message: str | None
+    started_at: datetime
+    completed_at: datetime | None
+
+
+class ProjectEnvironmentCreate(BaseModel):
+    key: str = Field(min_length=1, max_length=128)
+    value: str = Field(default="")
+    is_secret: bool = False
+
+
+class ProjectEnvironmentUpdate(BaseModel):
+    value: str | None = None
+    is_secret: bool | None = None
+
+
+class ProjectEnvironmentOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    project_id: int
+    key: str
+    value: str
+    is_secret: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class NextPortOut(BaseModel):
+    start_port: int
+    next_port: int
 
 
 class NginxApplyRequest(BaseModel):

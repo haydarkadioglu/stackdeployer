@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -9,12 +10,17 @@ from sqlalchemy.orm import Session
 from ..auth import require_admin
 from ..database import get_db
 from ..executor import DeploymentPlan, Executor, ExecutorError
-from ..models import Log, Project
+from ..models import Deployment, Log, Project, ProjectEnvironment
 from ..nginx_config import NginxConfigError, NginxManager, NginxSiteConfig
 from ..schemas import (
     CommandResultOut,
+    DeploymentOut,
     LogOut,
     NginxApplyRequest,
+    NextPortOut,
+    ProjectEnvironmentCreate,
+    ProjectEnvironmentOut,
+    ProjectEnvironmentUpdate,
     ProjectCreate,
     ProjectOut,
     ProjectUpdate,
@@ -31,12 +37,6 @@ ssl_service = SSLService()
 
 
 def _validate_service_constraints(service_type: str, internal_port: int | None, domain: str | None) -> None:
-    if service_type == "web" and internal_port is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="internal_port is required for web services",
-        )
-
     if service_type == "worker" and domain:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -57,15 +57,52 @@ def _create_log(db: Session, project_id: int, level: str, source: str, message: 
     db.commit()
 
 
+def _next_available_port(db: Session, start_port: int = 8000) -> int:
+    used_ports = set(
+        db.execute(select(Project.internal_port).where(Project.internal_port.is_not(None))).scalars().all()
+    )
+
+    port = max(start_port, 1)
+    while port in used_ports:
+        port += 1
+        if port > 65535:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No available port left in valid range",
+            )
+    return port
+
+
+def _to_env_out(item: ProjectEnvironment, reveal_secrets: bool = False) -> ProjectEnvironmentOut:
+    value = item.value if reveal_secrets or not item.is_secret else "********"
+    return ProjectEnvironmentOut(
+        id=item.id,
+        project_id=item.project_id,
+        key=item.key,
+        value=value,
+        is_secret=item.is_secret,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+    )
+
+
 @router.get("", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)) -> list[Project]:
     return db.execute(select(Project).order_by(Project.created_at.desc())).scalars().all()
 
 
+@router.get("/ports/next", response_model=NextPortOut)
+def get_next_port(start_port: int = 8000, db: Session = Depends(get_db)) -> NextPortOut:
+    return NextPortOut(start_port=start_port, next_port=_next_available_port(db, start_port))
+
+
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Project:
-    _validate_service_constraints(payload.service_type, payload.internal_port, payload.domain)
-    project = Project(**payload.model_dump())
+    resolved_port = payload.internal_port or _next_available_port(db, 8000)
+    _validate_service_constraints(payload.service_type, resolved_port, payload.domain)
+    project_data = payload.model_dump()
+    project_data["internal_port"] = resolved_port
+    project = Project(**project_data)
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -85,10 +122,15 @@ def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depend
     next_service_type = payload.service_type if "service_type" in fields else project.service_type
     next_internal_port = payload.internal_port if "internal_port" in fields else project.internal_port
     next_domain = payload.domain if "domain" in fields else project.domain
+
+    if next_internal_port is None:
+        next_internal_port = _next_available_port(db, 8000)
+
     _validate_service_constraints(next_service_type, next_internal_port, next_domain)
 
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(project, key, value)
+    project.internal_port = next_internal_port
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -119,9 +161,116 @@ def get_project_logs(project_id: int, limit: int = 200, db: Session = Depends(ge
     return rows
 
 
+@router.get("/{project_id}/deployments", response_model=list[DeploymentOut])
+def list_project_deployments(project_id: int, limit: int = 50, db: Session = Depends(get_db)) -> list[Deployment]:
+    _get_project_or_404(db, project_id)
+    rows = (
+        db.execute(
+            select(Deployment)
+            .where(Deployment.project_id == project_id)
+            .order_by(Deployment.started_at.desc())
+            .limit(min(max(limit, 1), 200))
+        )
+        .scalars()
+        .all()
+    )
+    return rows
+
+
+@router.get("/{project_id}/env", response_model=list[ProjectEnvironmentOut])
+def list_project_environment(
+    project_id: int,
+    reveal_secrets: bool = False,
+    db: Session = Depends(get_db),
+) -> list[ProjectEnvironmentOut]:
+    _get_project_or_404(db, project_id)
+    items = (
+        db.execute(
+            select(ProjectEnvironment)
+            .where(ProjectEnvironment.project_id == project_id)
+            .order_by(ProjectEnvironment.key.asc())
+        )
+        .scalars()
+        .all()
+    )
+    return [_to_env_out(item, reveal_secrets=reveal_secrets) for item in items]
+
+
+@router.post("/{project_id}/env", response_model=ProjectEnvironmentOut, status_code=status.HTTP_201_CREATED)
+def create_project_environment(
+    project_id: int,
+    payload: ProjectEnvironmentCreate,
+    db: Session = Depends(get_db),
+) -> ProjectEnvironmentOut:
+    _get_project_or_404(db, project_id)
+
+    key = payload.key.strip()
+    if not key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="key cannot be empty")
+
+    existing = db.execute(
+        select(ProjectEnvironment).where(
+            ProjectEnvironment.project_id == project_id,
+            ProjectEnvironment.key == key,
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Environment key already exists")
+
+    item = ProjectEnvironment(
+        project_id=project_id,
+        key=key,
+        value=payload.value,
+        is_secret=payload.is_secret,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _to_env_out(item)
+
+
+@router.patch("/{project_id}/env/{env_id}", response_model=ProjectEnvironmentOut)
+def update_project_environment(
+    project_id: int,
+    env_id: int,
+    payload: ProjectEnvironmentUpdate,
+    db: Session = Depends(get_db),
+) -> ProjectEnvironmentOut:
+    _get_project_or_404(db, project_id)
+    item = db.get(ProjectEnvironment, env_id)
+    if not item or item.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Environment variable not found")
+
+    if payload.value is not None:
+        item.value = payload.value
+    if payload.is_secret is not None:
+        item.is_secret = payload.is_secret
+
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _to_env_out(item)
+
+
+@router.delete("/{project_id}/env/{env_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_project_environment(project_id: int, env_id: int, db: Session = Depends(get_db)) -> Response:
+    _get_project_or_404(db, project_id)
+    item = db.get(ProjectEnvironment, env_id)
+    if not item or item.project_id != project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Environment variable not found")
+
+    db.delete(item)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/{project_id}/deploy", status_code=status.HTTP_202_ACCEPTED)
 def deploy_project(project_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
     project = _get_project_or_404(db, project_id)
+    deployment = Deployment(project_id=project.id, status="building", branch="main")
+    db.add(deployment)
+    db.commit()
+    db.refresh(deployment)
 
     def logger(line: str) -> None:
         _create_log(db, project.id, "INFO", "executor", line)
@@ -142,11 +291,18 @@ def deploy_project(project_id: int, db: Session = Depends(get_db)) -> dict[str, 
         executor.deploy(plan, stream=logger)
 
         project.status = "running"
+        deployment.status = "completed"
+        deployment.completed_at = datetime.now(timezone.utc)
         db.add(project)
+        db.add(deployment)
         db.commit()
     except ExecutorError as exc:
         project.status = "error"
+        deployment.status = "error"
+        deployment.error_message = str(exc)
+        deployment.completed_at = datetime.now(timezone.utc)
         db.add(project)
+        db.add(deployment)
         db.commit()
         _create_log(db, project.id, "ERROR", "executor", str(exc))
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc

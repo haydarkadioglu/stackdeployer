@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -29,6 +29,12 @@ class Project(Base):
 
     logs: Mapped[list["Log"]] = relationship(
         "Log", back_populates="project", cascade="all, delete-orphan"
+    )
+    deployments: Mapped[list["Deployment"]] = relationship(
+        "Deployment", back_populates="project", cascade="all, delete-orphan"
+    )
+    environment_variables: Mapped[list["ProjectEnvironment"]] = relationship(
+        "ProjectEnvironment", back_populates="project", cascade="all, delete-orphan"
     )
 
 
@@ -70,3 +76,40 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class Deployment(Base):
+    __tablename__ = "deployments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="building", index=True)
+    branch: Mapped[str] = mapped_column(String(128), nullable=False, default="main")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+    project: Mapped["Project"] = relationship("Project", back_populates="deployments")
+
+
+class ProjectEnvironment(Base):
+    __tablename__ = "project_environment"
+    __table_args__ = (
+        UniqueConstraint("project_id", "key", name="uq_project_environment_project_id_key"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
+    is_secret: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    project: Mapped["Project"] = relationship("Project", back_populates="environment_variables")

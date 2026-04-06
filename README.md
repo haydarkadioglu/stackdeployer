@@ -2,6 +2,9 @@
 
 StackDeployer is a self-hosted control plane for deploying multiple projects (FastAPI, Node.js, mixed stacks) on a single VPS.
 
+For full production and operations details, see:
+- [docs/DETAILED_SETUP.md](docs/DETAILED_SETUP.md)
+
 ## Start Here: Import, Run, and Publish
 
 ### 1. Import the repository

@@ -8,6 +8,10 @@ __pycache__/
 .venv/
 venv/
 
+#github
+.github/
+
+
 # Environment
 .env
 .env.*

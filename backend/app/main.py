@@ -2,9 +2,11 @@ from fastapi import FastAPI
 
 from .config import settings
 from .database import init_db
+from .routers.projects import router as projects_router
 
 
 app = FastAPI(title=settings.app_name)
+app.include_router(projects_router)
 
 
 @app.on_event("startup")

@@ -245,3 +245,35 @@ class DomainValidationOut(BaseModel):
     domain: str
     all_matched: bool
     records: list[DomainValidationRecordOut]
+
+
+class ProjectSSLStatusOut(BaseModel):
+    domain: str
+    certificate_present: bool
+    expires_at: str | None
+    days_remaining: int | None
+    issuer: str | None
+    raw_output: str | None = None
+
+
+class SystemServiceStatusOut(BaseModel):
+    name: str
+    ok: bool
+    detail: str
+
+
+class SystemInfoOut(BaseModel):
+    app_name: str
+    environment: str
+    host: str
+    platform: str
+    python_version: str
+    disk_total_bytes: int
+    disk_used_bytes: int
+    disk_free_bytes: int
+    project_total: int
+    project_running: int
+    project_error: int
+    deployment_total: int
+    deployment_last_24h: int
+    services: list[SystemServiceStatusOut]

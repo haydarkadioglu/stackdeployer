@@ -191,6 +191,10 @@ export async function removeNginxRoute(token, projectId, siteName) {
   });
 }
 
+export async function getProjectSSLStatus(token, projectId) {
+  return request(`/api/v1/projects/${projectId}/ssl/status`, { token });
+}
+
 export async function getDomainPlan(token, projectId, mode, domain) {
   const query = new URLSearchParams({ mode });
   if (domain) {
@@ -224,6 +228,10 @@ export async function runSelfUpdate(token, payload) {
     token,
     body: payload,
   });
+}
+
+export async function getSystemInfo(token) {
+  return request("/api/v1/system/info", { token });
 }
 
 export { API_BASE_URL };

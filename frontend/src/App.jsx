@@ -8,6 +8,8 @@ import {
   createProjectEnvironment,
   deleteProjectEnvironment,
   deployProject,
+  getProjectSSLStatus,
+  getSystemInfo,
   getMe,
   getDomainPlan,
   getNextPort,
@@ -117,6 +119,7 @@ function AuthScreen({ error, username, setUsername, password, setPassword, onLog
 
 function ProjectsIndexPage({
   projects,
+  systemInfo,
   busyAction,
   newProject,
   setNewProject,
@@ -191,6 +194,26 @@ function ProjectsIndexPage({
 
   return (
     <section className="project-section">
+      {systemInfo ? (
+        <div className="stats-grid" style={{ marginBottom: 12 }}>
+          <article className="metric-card">
+            <span>RUNNING PROJECTS</span>
+            <strong>{systemInfo.project_running}</strong>
+            <small>/ {systemInfo.project_total} total</small>
+          </article>
+          <article className="metric-card">
+            <span>DEPLOYS (24H)</span>
+            <strong>{systemInfo.deployment_last_24h}</strong>
+            <small>{systemInfo.deployment_total} all-time</small>
+          </article>
+          <article className="metric-card">
+            <span>DISK FREE</span>
+            <strong>{Math.max(0, Math.round((systemInfo.disk_free_bytes || 0) / (1024 * 1024 * 1024)))}G</strong>
+            <small>{systemInfo.environment}</small>
+          </article>
+        </div>
+      ) : null}
+
       <h2>CREATE PROJECT (WIZARD)</h2>
       <div className="wizard-steps" role="tablist" aria-label="create project steps">
         <button type="button" className={`wizard-step ${wizardStep === 1 ? "active" : ""}`} onClick={() => setWizardStep(1)}>
@@ -449,6 +472,7 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
   const [domainMode, setDomainMode] = useState("auto");
   const [dnsRecords, setDnsRecords] = useState([]);
   const [domainValidation, setDomainValidation] = useState(null);
+  const [sslStatus, setSslStatus] = useState(null);
   const [settingsForm, setSettingsForm] = useState({
     name: "",
     tech_stack: "",
@@ -694,6 +718,15 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
       setDnsRecords(refreshed?.records || []);
     } catch (err) {
       setGlobalError(err.message || "Domain validation failed");
+    }
+  }
+
+  async function handleCheckSSLStatus() {
+    try {
+      const statusPayload = await getProjectSSLStatus(token, projectId);
+      setSslStatus(statusPayload);
+    } catch (err) {
+      setGlobalError(err.message || "SSL status check failed");
     }
   }
 
@@ -968,7 +1001,18 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
             <button type="button" className="ghost-btn" onClick={handleValidateDomainRecords} disabled={project.service_type !== "web" || !domainValid}>
               validate dns
             </button>
+            <button type="button" className="ghost-btn" onClick={handleCheckSSLStatus} disabled={project.service_type !== "web" || !domainValid}>
+              check ssl status
+            </button>
           </div>
+
+          {sslStatus ? (
+            <div className="wizard-inline-help" style={{ marginBottom: 12 }}>
+              <span>
+                ssl: {sslStatus.certificate_present ? "issued" : "not issued"} • expires: {sslStatus.expires_at || "n/a"} • days left: {sslStatus.days_remaining ?? "n/a"}
+              </span>
+            </div>
+          ) : null}
 
           {domainValidation ? (
             <div className="terminal" style={{ marginBottom: 12 }}>
@@ -1050,6 +1094,44 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
           </form>
         </>
       ) : null}
+    </section>
+  );
+}
+
+function SystemDashboardPage({ systemInfo }) {
+  if (!systemInfo) {
+    return <section className="project-section"><h2>loading system info...</h2></section>;
+  }
+
+  return (
+    <section className="project-section">
+      <h2>SYSTEM DASHBOARD</h2>
+      <div className="project-list" style={{ marginBottom: 12 }}>
+        <article className="project-row">
+          <div className="project-main">
+            <h3>{systemInfo.app_name}</h3>
+            <p>{systemInfo.platform} • python {systemInfo.python_version} • host {systemInfo.host}</p>
+          </div>
+        </article>
+      </div>
+      <div className="stats-grid" style={{ marginBottom: 12 }}>
+        <article className="metric-card"><span>PROJECTS</span><strong>{systemInfo.project_total}</strong><small>{systemInfo.project_running} running / {systemInfo.project_error} error</small></article>
+        <article className="metric-card"><span>DEPLOYMENTS</span><strong>{systemInfo.deployment_total}</strong><small>{systemInfo.deployment_last_24h} in last 24h</small></article>
+        <article className="metric-card"><span>DISK USED</span><strong>{Math.max(0, Math.round((systemInfo.disk_used_bytes || 0) / (1024 * 1024 * 1024)))}G</strong><small>free {Math.max(0, Math.round((systemInfo.disk_free_bytes || 0) / (1024 * 1024 * 1024)))}G</small></article>
+      </div>
+      <div className="project-list">
+        {(systemInfo.services || []).map((service) => (
+          <article key={service.name} className="project-row">
+            <div className="project-main">
+              <div className="project-title-wrap">
+                <h3>{service.name}</h3>
+                <StatusBadge status={service.ok ? "running" : "error"} />
+              </div>
+              <p>{service.detail}</p>
+            </div>
+          </article>
+        ))}
+      </div>
     </section>
   );
 }
@@ -1247,6 +1329,7 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [me, setMe] = useState(null);
   const [projects, setProjects] = useState([]);
+  const [systemInfo, setSystemInfo] = useState(null);
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
@@ -1284,6 +1367,15 @@ export default function App() {
         if (!cancelled) {
           setMe(meData);
           setProjects(projectData || []);
+          getSystemInfo(token).then((payload) => {
+            if (!cancelled) {
+              setSystemInfo(payload);
+            }
+          }).catch(() => {
+            if (!cancelled) {
+              setSystemInfo(null);
+            }
+          });
         }
       } catch (err) {
         if (!cancelled) {
@@ -1500,6 +1592,9 @@ export default function App() {
             <NavLink to="/settings/general" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
               General Settings
             </NavLink>
+            <NavLink to="/system/dashboard" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
+              System Dashboard
+            </NavLink>
           </div>
           <div className="menu-group">
             <p>QUICK LINKS</p>
@@ -1519,6 +1614,7 @@ export default function App() {
               element={
                 <ProjectsIndexPage
                   projects={projects}
+                  systemInfo={systemInfo}
                   busyAction={busyAction}
                   newProject={newProject}
                   setNewProject={setNewProject}
@@ -1563,6 +1659,10 @@ export default function App() {
             <Route
               path="/settings/general"
               element={<GeneralSettingsPage token={token} setGlobalError={setError} />}
+            />
+            <Route
+              path="/system/dashboard"
+              element={<SystemDashboardPage systemInfo={systemInfo} />}
             />
             <Route path="*" element={<Navigate to="/projects" replace />} />
           </Routes>

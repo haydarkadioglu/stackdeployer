@@ -31,6 +31,7 @@ from ..schemas import (
     NextPortOut,
     ProjectImportAnalyzeOut,
     ProjectImportAnalyzeRequest,
+    ProjectSSLStatusOut,
     ProjectEnvironmentCreate,
     ProjectEnvironmentOut,
     ProjectEnvironmentUpdate,
@@ -875,6 +876,27 @@ def issue_ssl(project_id: int, payload: SSLIssueRequest, db: Session = Depends(g
         return {"status": "ok", "message": output}
     except SSLServiceError as exc:
         _create_log(db, project.id, "ERROR", "ssl", str(exc))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/{project_id}/ssl/status", response_model=ProjectSSLStatusOut)
+def get_ssl_status(project_id: int, db: Session = Depends(get_db)) -> ProjectSSLStatusOut:
+    project = _get_project_or_404(db, project_id)
+    if project.service_type != "web":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="SSL status is only available for web services",
+        )
+    if not project.domain:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="project domain is required before checking SSL status",
+        )
+
+    try:
+        status_payload = ssl_service.certificate_status(project.domain)
+        return ProjectSSLStatusOut(**status_payload)
+    except SSLServiceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 

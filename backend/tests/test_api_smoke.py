@@ -480,3 +480,58 @@ def test_custom_domain_records_and_validation_flow(client, monkeypatch) -> None:
     validate_response = client.post(f"/api/v1/projects/{project_id}/domain/validate", headers=headers)
     assert validate_response.status_code == 200, validate_response.text
     assert validate_response.json()["all_matched"] is True
+
+
+def test_ssl_status_endpoint_with_mock(client, monkeypatch) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    create_response = client.post(
+        "/api/v1/projects",
+        headers=headers,
+        json={
+            "service_type": "web",
+            "name": "ssl-status-project",
+            "git_url": "https://example.com/ssl-status-project.git",
+            "local_path": "/srv/apps/ssl-status-project",
+            "tech_stack": "node",
+            "internal_port": 8092,
+            "start_command": "npm start",
+            "domain": "ssl-status.example.com",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    project_id = create_response.json()["id"]
+
+    from app.routers import projects as projects_router
+
+    monkeypatch.setattr(
+        projects_router.ssl_service,
+        "certificate_status",
+        lambda domain: {
+            "domain": domain,
+            "certificate_present": True,
+            "expires_at": "2030-01-01 00:00:00+00:00",
+            "days_remaining": 1000,
+            "issuer": "Fake CA",
+            "raw_output": "ok",
+        },
+    )
+
+    response = client.get(f"/api/v1/projects/{project_id}/ssl/status", headers=headers)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["certificate_present"] is True
+    assert payload["issuer"] == "Fake CA"
+
+
+def test_system_info_endpoint(client) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    response = client.get("/api/v1/system/info", headers=headers)
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert "app_name" in payload
+    assert "services" in payload
+    assert isinstance(payload["services"], list)

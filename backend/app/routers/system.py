@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+import os
 from pathlib import Path
+import platform
 import re
+import shutil
+import sys
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
 
 from ..auth import require_admin
 from ..config import settings
+from ..database import get_db
 from ..executor import CommandResult, Executor, ExecutorError
-from ..schemas import CommandResultOut, SelfUpdateRequest, SelfUpdateResultOut
+from ..models import Deployment, Project
+from ..schemas import CommandResultOut, SelfUpdateRequest, SelfUpdateResultOut, SystemInfoOut, SystemServiceStatusOut
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"], dependencies=[Depends(require_admin)])
 executor = Executor()
@@ -24,6 +33,72 @@ def _as_out(result: CommandResult) -> CommandResultOut:
         returncode=result.returncode,
         stdout=result.stdout,
         stderr=result.stderr,
+    )
+
+
+def _probe_pm2() -> SystemServiceStatusOut:
+    try:
+        result = executor.pm2_status()
+        return SystemServiceStatusOut(name="pm2", ok=result.returncode == 0, detail="reachable")
+    except Exception as exc:  # noqa: BLE001
+        return SystemServiceStatusOut(name="pm2", ok=False, detail=str(exc))
+
+
+def _probe_nginx() -> SystemServiceStatusOut:
+    try:
+        result = executor.run(["nginx", "-t"])
+        ok = result.returncode == 0
+        detail = (result.stdout.strip() or result.stderr.strip() or ("ok" if ok else "failed"))
+        return SystemServiceStatusOut(name="nginx", ok=ok, detail=detail[:240])
+    except Exception as exc:  # noqa: BLE001
+        return SystemServiceStatusOut(name="nginx", ok=False, detail=str(exc)[:240])
+
+
+def _probe_database(db: Session) -> SystemServiceStatusOut:
+    try:
+        _ = db.execute(select(func.count(Project.id))).scalar_one()
+        return SystemServiceStatusOut(name="database", ok=True, detail="reachable")
+    except Exception as exc:  # noqa: BLE001
+        return SystemServiceStatusOut(name="database", ok=False, detail=str(exc)[:240])
+
+
+@router.get("/info", response_model=SystemInfoOut)
+def system_info(db: Session = Depends(get_db)) -> SystemInfoOut:
+    disk_path = Path(settings.self_update_repo_root)
+    if not disk_path.exists():
+        disk_path = Path.cwd()
+
+    disk_total, disk_used, disk_free = shutil.disk_usage(disk_path)
+
+    project_total = db.execute(select(func.count(Project.id))).scalar_one()
+    project_running = db.execute(select(func.count(Project.id)).where(Project.status == "running")).scalar_one()
+    project_error = db.execute(select(func.count(Project.id)).where(Project.status == "error")).scalar_one()
+    deployment_total = db.execute(select(func.count(Deployment.id))).scalar_one()
+
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    deployment_last_24h = db.execute(
+        select(func.count(Deployment.id)).where(Deployment.started_at >= since)
+    ).scalar_one()
+
+    services = [_probe_database(db)]
+    services.append(_probe_pm2())
+    services.append(_probe_nginx())
+
+    return SystemInfoOut(
+        app_name=settings.app_name,
+        environment=settings.app_env,
+        host=platform.node() or os.getenv("HOSTNAME", "unknown"),
+        platform=f"{platform.system()} {platform.release()}",
+        python_version=sys.version.split(" ", 1)[0],
+        disk_total_bytes=disk_total,
+        disk_used_bytes=disk_used,
+        disk_free_bytes=disk_free,
+        project_total=project_total,
+        project_running=project_running,
+        project_error=project_error,
+        deployment_total=deployment_total,
+        deployment_last_24h=deployment_last_24h,
+        services=services,
     )
 
 

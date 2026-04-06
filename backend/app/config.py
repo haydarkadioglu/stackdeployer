@@ -17,3 +17,11 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def validate_security_settings() -> None:
+    if settings.app_env.lower() == "production":
+        if settings.jwt_secret == "change-me-in-production" or len(settings.jwt_secret) < 32:
+            raise ValueError(
+                "Invalid jwt_secret for production. Set a strong random secret with at least 32 characters."
+            )

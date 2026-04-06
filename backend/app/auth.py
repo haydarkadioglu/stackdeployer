@@ -48,6 +48,14 @@ def _create_access_token(user: User) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 
+def decode_token_subject(token: str) -> int:
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        return int(payload.get("sub", 0))
+    except (jwt.InvalidTokenError, ValueError) as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
@@ -56,11 +64,7 @@ def get_current_user(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
 
     token = credentials.credentials
-    try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
-        user_id = int(payload.get("sub", 0))
-    except (jwt.InvalidTokenError, ValueError) as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token") from exc
+    user_id = decode_token_subject(token)
 
     user = db.get(User, user_id)
     if not user or not user.is_active:

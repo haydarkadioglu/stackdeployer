@@ -25,6 +25,20 @@ executor = Executor()
 nginx_manager = NginxManager()
 
 
+def _validate_service_constraints(service_type: str, internal_port: int | None, domain: str | None) -> None:
+    if service_type == "web" and internal_port is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="internal_port is required for web services",
+        )
+
+    if service_type == "worker" and domain:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="domain is not supported for worker services",
+        )
+
+
 def _get_project_or_404(db: Session, project_id: int) -> Project:
     project = db.get(Project, project_id)
     if not project:
@@ -45,6 +59,7 @@ def list_projects(db: Session = Depends(get_db)) -> list[Project]:
 
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Project:
+    _validate_service_constraints(payload.service_type, payload.internal_port, payload.domain)
     project = Project(**payload.model_dump())
     db.add(project)
     db.commit()
@@ -60,6 +75,12 @@ def get_project(project_id: int, db: Session = Depends(get_db)) -> Project:
 @router.patch("/{project_id}", response_model=ProjectOut)
 def update_project(project_id: int, payload: ProjectUpdate, db: Session = Depends(get_db)) -> Project:
     project = _get_project_or_404(db, project_id)
+
+    next_service_type = payload.service_type or project.service_type
+    next_internal_port = payload.internal_port if payload.internal_port is not None else project.internal_port
+    next_domain = payload.domain if payload.domain is not None else project.domain
+    _validate_service_constraints(next_service_type, next_internal_port, next_domain)
+
     for key, value in payload.model_dump(exclude_unset=True).items():
         setattr(project, key, value)
     db.add(project)
@@ -185,6 +206,16 @@ def project_status(project_id: int, db: Session = Depends(get_db)) -> CommandRes
 @router.post("/{project_id}/nginx/apply")
 def apply_nginx(project_id: int, payload: NginxApplyRequest, db: Session = Depends(get_db)) -> dict[str, str]:
     project = _get_project_or_404(db, project_id)
+    if project.service_type != "web":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nginx routing is only available for web services",
+        )
+    if project.internal_port is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="internal_port is required before applying nginx",
+        )
     try:
         path = nginx_manager.apply_site(
             NginxSiteConfig(

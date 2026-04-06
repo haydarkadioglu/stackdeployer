@@ -47,7 +47,7 @@ function ProjectRow({ project, onLogs, onRestart, onDeploy, busyAction }) {
           <StatusBadge status={project.status} />
         </div>
         <p>
-          {project.tech_stack} • port {project.internal_port} • {project.domain || "domain yok"} •
+          {project.tech_stack} • {project.service_type} • {project.internal_port ? `port ${project.internal_port}` : "no port"} • {project.domain || "domain yok"} •
           {" "}
           {formatWhen(project.updated_at)}
         </p>

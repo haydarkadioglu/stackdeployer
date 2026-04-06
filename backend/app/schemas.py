@@ -1,20 +1,29 @@
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class ProjectCreate(BaseModel):
+    service_type: Literal["web", "worker"] = "web"
     name: str = Field(min_length=2, max_length=120)
     git_url: str = Field(min_length=3, max_length=1000)
     local_path: str = Field(min_length=2, max_length=1000)
     domain: str | None = Field(default=None, max_length=255)
-    internal_port: int = Field(ge=1, le=65535)
+    internal_port: int | None = Field(default=None, ge=1, le=65535)
     tech_stack: str = Field(min_length=2, max_length=64)
     build_command: str | None = None
     start_command: str | None = None
 
+    @model_validator(mode="after")
+    def validate_service_shape(self) -> "ProjectCreate":
+        if self.service_type == "web" and self.internal_port is None:
+            raise ValueError("internal_port is required for web services")
+        return self
+
 
 class ProjectUpdate(BaseModel):
+    service_type: Literal["web", "worker"] | None = None
     name: str | None = Field(default=None, min_length=2, max_length=120)
     git_url: str | None = Field(default=None, min_length=3, max_length=1000)
     local_path: str | None = Field(default=None, min_length=2, max_length=1000)
@@ -28,11 +37,12 @@ class ProjectUpdate(BaseModel):
 
 class ProjectOut(BaseModel):
     id: int
+    service_type: Literal["web", "worker"]
     name: str
     git_url: str
     local_path: str
     domain: str | None
-    internal_port: int
+    internal_port: int | None
     tech_stack: str
     build_command: str | None
     start_command: str | None

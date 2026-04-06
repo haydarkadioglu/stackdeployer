@@ -85,6 +85,7 @@ Run backend and frontend manually if you are not using the VPS installer.
 
 ## Current Backend Capabilities
 - Project CRUD API
+- Service types: `web` and `worker` (console/background processes)
 - JWT auth (`bootstrap`, `login`, `me`)
 - Deployment executor (git, install, build, PM2 lifecycle)
 - Nginx site automation (apply/remove with validation)

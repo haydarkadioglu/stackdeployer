@@ -17,6 +17,12 @@ Deployer is a self-hosted control plane for deploying multiple projects (FastAPI
 4. Run migrations from `backend/`: `alembic upgrade head`.
 5. Start API from `backend/`: `uvicorn app.main:app --reload`.
 
+## Frontend (Dashboard)
+1. Change directory to `frontend/`.
+2. Install dependencies: `npm install`.
+3. Run development server: `npm run dev`.
+4. Open the local Vite URL shown in terminal.
+
 ## VPS Installation (Ubuntu/Debian)
 Run:
 

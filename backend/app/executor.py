@@ -30,6 +30,8 @@ class DeploymentPlan:
     branch: str = "main"
     build_command: str | None = None
     start_command: str | None = None
+    internal_port: int | None = None
+    service_type: str = "web"
 
 
 class Executor:
@@ -94,6 +96,80 @@ class Executor:
         if (root / "requirements.txt").exists() or (root / "pyproject.toml").exists():
             return "python"
         raise ExecutorError(f"Unable to detect tech stack in {root}")
+
+    def detect_python_framework(self, project_dir: str | Path) -> str:
+        root = Path(project_dir)
+
+        if (root / "manage.py").exists():
+            return "django"
+
+        requirements = root / "requirements.txt"
+        if requirements.exists():
+            content = requirements.read_text(encoding="utf-8", errors="ignore").lower()
+            if "fastapi" in content:
+                return "fastapi"
+            if "flask" in content:
+                return "flask"
+            if "django" in content:
+                return "django"
+
+        pyproject = root / "pyproject.toml"
+        if pyproject.exists():
+            content = pyproject.read_text(encoding="utf-8", errors="ignore").lower()
+            if "fastapi" in content:
+                return "fastapi"
+            if "flask" in content:
+                return "flask"
+            if "django" in content:
+                return "django"
+
+        app_main = root / "app" / "main.py"
+        if app_main.exists():
+            content = app_main.read_text(encoding="utf-8", errors="ignore")
+            if "FastAPI(" in content:
+                return "fastapi"
+
+        flask_main = root / "app.py"
+        if flask_main.exists():
+            content = flask_main.read_text(encoding="utf-8", errors="ignore")
+            if "Flask(" in content:
+                return "flask"
+
+        return "python"
+
+    def suggest_commands(
+        self,
+        project_dir: str | Path | None,
+        stack: str,
+        service_type: str,
+        port: int,
+    ) -> tuple[str | None, str | None, str | None]:
+        normalized = stack.lower()
+
+        if normalized == "node":
+            start = "npm start"
+            if service_type == "worker":
+                start = "node worker.js"
+            return "npm run build", start, None
+
+        if normalized == "python":
+            framework = "python"
+            if project_dir:
+                framework = self.detect_python_framework(project_dir)
+
+            if framework == "fastapi":
+                return None, f"uvicorn app.main:app --host 0.0.0.0 --port {port}", framework
+            if framework == "django":
+                return None, f"python manage.py runserver 0.0.0.0:{port}", framework
+            if framework == "flask":
+                return None, f"flask run --host 0.0.0.0 --port {port}", framework
+
+            if service_type == "worker":
+                return None, "python worker.py", framework
+
+            return None, f"uvicorn app.main:app --host 0.0.0.0 --port {port}", framework
+
+        return None, None, None
 
     def install_dependencies(self, project_dir: str | Path, stack: str | None = None) -> CommandResult:
         resolved_stack = stack or self.detect_stack(project_dir)
@@ -198,8 +274,20 @@ class Executor:
             stream("Build failed")
             raise ExecutorError(build_result.stderr or "Build failed")
 
-        if plan.start_command:
-            parts = shlex.split(plan.start_command)
+        resolved_start_command = plan.start_command
+        if not resolved_start_command:
+            _build, suggested_start, framework = self.suggest_commands(
+                plan.target_dir,
+                stack=stack,
+                service_type=plan.service_type,
+                port=plan.internal_port or 8000,
+            )
+            resolved_start_command = suggested_start
+            if framework:
+                stream(f"Detected python framework: {framework}")
+
+        if resolved_start_command:
+            parts = shlex.split(resolved_start_command)
             script = parts[0]
             extra_args = parts[1:] if len(parts) > 1 else None
             app_name = plan.target_dir.name

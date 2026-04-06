@@ -246,6 +246,36 @@ body {
   color: hsl(43 88% 72%);
 }
 
+.wizard-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.wizard-step {
+  border: 1px solid hsl(41 16% 41%);
+  background: hsl(39 7% 15%);
+  color: hsl(40 20% 86%);
+  border-radius: 10px;
+  padding: 9px 10px;
+  text-align: center;
+  font-family: "JetBrains Mono", monospace;
+  cursor: pointer;
+}
+
+.wizard-step.active {
+  border-color: hsl(44 71% 58%);
+  color: hsl(43 88% 72%);
+}
+
+.wizard-nav {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 h2 {
   font-size: 0.83rem;
   letter-spacing: 0.08em;

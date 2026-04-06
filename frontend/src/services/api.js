@@ -128,6 +128,18 @@ export async function getNextPort(token, startPort = 8000) {
   return request(`/api/v1/projects/ports/next?start_port=${startPort}`, { token });
 }
 
+export async function analyzeProjectImport(token, payload) {
+  return request("/api/v1/projects/import/analyze", {
+    method: "POST",
+    token,
+    body: payload,
+  });
+}
+
+export async function listImportPaths(token) {
+  return request("/api/v1/projects/import/paths", { token });
+}
+
 export async function deployProject(token, projectId) {
   return request(`/api/v1/projects/${projectId}/deploy`, {
     method: "POST",

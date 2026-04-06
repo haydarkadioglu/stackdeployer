@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
@@ -15,9 +16,12 @@ from ..nginx_config import NginxConfigError, NginxManager, NginxSiteConfig
 from ..schemas import (
     CommandResultOut,
     DeploymentOut,
+    ImportPathsOut,
     LogOut,
     NginxApplyRequest,
     NextPortOut,
+    ProjectImportAnalyzeOut,
+    ProjectImportAnalyzeRequest,
     ProjectEnvironmentCreate,
     ProjectEnvironmentOut,
     ProjectEnvironmentUpdate,
@@ -34,6 +38,7 @@ router = APIRouter(prefix="/api/v1/projects", tags=["projects"], dependencies=[D
 executor = Executor()
 nginx_manager = NginxManager()
 ssl_service = SSLService()
+DEFAULT_IMPORT_BASE_PATHS = ["/srv/apps", "/opt/apps", "/home/ubuntu/apps"]
 
 
 def _validate_service_constraints(service_type: str, internal_port: int | None, domain: str | None) -> None:
@@ -73,6 +78,29 @@ def _next_available_port(db: Session, start_port: int = 8000) -> int:
     return port
 
 
+def _safe_slug_from_git_url(git_url: str) -> str:
+    trimmed = git_url.strip().rstrip("/")
+    leaf = trimmed.split("/")[-1]
+    if leaf.endswith(".git"):
+        leaf = leaf[:-4]
+    leaf = re.sub(r"[^a-zA-Z0-9._-]", "-", leaf).strip("-")
+    return leaf or "new-project"
+
+
+def _discover_paths(base_paths: list[str]) -> list[str]:
+    discovered: list[str] = []
+    for base in base_paths:
+        base_path = Path(base)
+        if not base_path.exists() or not base_path.is_dir():
+            continue
+
+        discovered.append(str(base_path))
+        for child in sorted(base_path.iterdir(), key=lambda p: p.name.lower()):
+            if child.is_dir() and not child.name.startswith("."):
+                discovered.append(str(child))
+    return discovered
+
+
 def _to_env_out(item: ProjectEnvironment, reveal_secrets: bool = False) -> ProjectEnvironmentOut:
     value = item.value if reveal_secrets or not item.is_secret else "********"
     return ProjectEnvironmentOut(
@@ -86,6 +114,21 @@ def _to_env_out(item: ProjectEnvironment, reveal_secrets: bool = False) -> Proje
     )
 
 
+def _suggest_commands(
+    project_path: str | None,
+    stack: str,
+    service_type: str,
+    port: int,
+) -> tuple[str | None, str | None, str | None]:
+    path_arg = Path(project_path) if project_path and Path(project_path).exists() else None
+    return executor.suggest_commands(
+        project_dir=path_arg,
+        stack=stack,
+        service_type=service_type,
+        port=port,
+    )
+
+
 @router.get("", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)) -> list[Project]:
     return db.execute(select(Project).order_by(Project.created_at.desc())).scalars().all()
@@ -96,12 +139,93 @@ def get_next_port(start_port: int = 8000, db: Session = Depends(get_db)) -> Next
     return NextPortOut(start_port=start_port, next_port=_next_available_port(db, start_port))
 
 
+@router.get("/import/paths", response_model=ImportPathsOut)
+def list_import_paths(db: Session = Depends(get_db)) -> ImportPathsOut:
+    _ = db
+    discovered = _discover_paths(DEFAULT_IMPORT_BASE_PATHS)
+    return ImportPathsOut(base_paths=DEFAULT_IMPORT_BASE_PATHS, discovered_paths=discovered)
+
+
+@router.post("/import/analyze", response_model=ProjectImportAnalyzeOut)
+def analyze_project_import(payload: ProjectImportAnalyzeRequest, db: Session = Depends(get_db)) -> ProjectImportAnalyzeOut:
+    suggested_port = _next_available_port(db, 8000)
+    existing_paths = set(db.execute(select(Project.local_path)).scalars().all())
+
+    candidate_paths = _discover_paths(DEFAULT_IMPORT_BASE_PATHS)
+    suggested_project_name: str | None = None
+    if payload.git_url:
+        repo_name = _safe_slug_from_git_url(payload.git_url)
+        suggested_project_name = repo_name
+        candidate_paths = [f"/srv/apps/{repo_name}", *candidate_paths]
+
+    local_path = payload.local_path.strip() if payload.local_path else None
+    if local_path and local_path not in candidate_paths:
+        candidate_paths = [local_path, *candidate_paths]
+
+    conflicting_paths = [path for path in candidate_paths if path in existing_paths]
+
+    detected_stack = payload.tech_stack.lower() if payload.tech_stack else None
+    detected_framework: str | None = None
+
+    if local_path and Path(local_path).exists() and Path(local_path).is_dir():
+        try:
+            detected_stack = executor.detect_stack(local_path)
+            if detected_stack == "python":
+                detected_framework = executor.detect_python_framework(local_path)
+        except ExecutorError:
+            detected_stack = detected_stack or None
+
+    if not detected_stack and payload.service_type == "web":
+        detected_stack = "python"
+
+    build_command = None
+    start_command = None
+    if detected_stack:
+        build_command, start_command, framework = _suggest_commands(
+            local_path,
+            stack=detected_stack,
+            service_type=payload.service_type,
+            port=suggested_port,
+        )
+        detected_framework = detected_framework or framework
+
+    return ProjectImportAnalyzeOut(
+        suggested_project_name=suggested_project_name,
+        suggested_local_paths=candidate_paths[:40],
+        conflicting_paths=conflicting_paths,
+        detected_stack=detected_stack,
+        detected_python_framework=detected_framework,
+        suggested_build_command=build_command,
+        suggested_start_command=start_command,
+        suggested_port=suggested_port,
+    )
+
+
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(payload: ProjectCreate, db: Session = Depends(get_db)) -> Project:
     resolved_port = payload.internal_port or _next_available_port(db, 8000)
     _validate_service_constraints(payload.service_type, resolved_port, payload.domain)
     project_data = payload.model_dump()
     project_data["internal_port"] = resolved_port
+
+    if not project_data.get("start_command"):
+        _build, suggested_start, _framework = _suggest_commands(
+            project_data.get("local_path"),
+            stack=project_data["tech_stack"],
+            service_type=project_data["service_type"],
+            port=resolved_port,
+        )
+        project_data["start_command"] = suggested_start
+
+    if not project_data.get("build_command"):
+        suggested_build, _start, _framework = _suggest_commands(
+            project_data.get("local_path"),
+            stack=project_data["tech_stack"],
+            service_type=project_data["service_type"],
+            port=resolved_port,
+        )
+        project_data["build_command"] = suggested_build
+
     project = Project(**project_data)
     db.add(project)
     db.commit()
@@ -281,6 +405,8 @@ def deploy_project(project_id: int, db: Session = Depends(get_db)) -> dict[str, 
         stack=project.tech_stack,
         build_command=project.build_command,
         start_command=project.start_command,
+        internal_port=project.internal_port,
+        service_type=project.service_type,
     )
 
     try:

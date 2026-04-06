@@ -2,6 +2,23 @@
 
 StackDeployer is a self-hosted control plane for deploying multiple projects (FastAPI, Node.js, mixed stacks) on a single VPS.
 
+## Supported Operating Systems
+- Ubuntu 22.04+
+- Debian 12+
+
+Notes:
+- Installer and service wiring are designed for Linux server environments.
+- Windows and macOS are supported for local development only (not production install via install.sh).
+
+## Supported Technology Stacks
+- Python services (FastAPI, Django, Flask, generic Python workers)
+- Node.js services (web and worker processes)
+- Mixed-stack deployments managed via PM2 process control
+
+Service modes:
+- web: HTTP service with optional domain and Nginx mapping
+- worker: background or console process without public route requirement
+
 For full production and operations details, see:
 - [docs/DETAILED_SETUP.md](docs/DETAILED_SETUP.md)
 

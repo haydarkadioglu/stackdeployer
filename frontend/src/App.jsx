@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 
 import {
+  analyzeProjectImport,
   applyNginxRoute,
   createProject,
   createProjectEnvironment,
@@ -11,6 +12,7 @@ import {
   getNextPort,
   getProject,
   getProjectLogs,
+  listImportPaths,
   listProjectDeployments,
   listProjectEnvironment,
   listProjects,
@@ -89,71 +91,214 @@ function ProjectsIndexPage({
   creatingProject,
   onCreate,
   onAction,
+  onAnalyze,
+  analyzeBusy,
+  analyzedInfo,
+  wizardStep,
+  setWizardStep,
+  importPaths,
+  loadingImportPaths,
+  importFilter,
+  setImportFilter,
+  onLoadImportPaths,
+  onStackPreset,
 }) {
   const navigate = useNavigate();
 
+  const isPython = (newProject.tech_stack || "").toLowerCase() === "python";
+
+  function canContinueFromImport() {
+    return (
+      newProject.name.trim().length > 1
+      && newProject.git_url.trim().length > 3
+      && newProject.local_path.trim().length > 1
+    );
+  }
+
+  function canContinueFromRuntime() {
+    if (newProject.service_type === "web") {
+      return newProject.tech_stack.trim().length > 1;
+    }
+    return newProject.tech_stack.trim().length > 1;
+  }
+
+  function goNext() {
+    if (wizardStep === 1 && !canContinueFromImport()) {
+      return;
+    }
+    if (wizardStep === 2 && !canContinueFromRuntime()) {
+      return;
+    }
+    setWizardStep((prev) => Math.min(prev + 1, 3));
+  }
+
+  function goPrev() {
+    setWizardStep((prev) => Math.max(prev - 1, 1));
+  }
+
   return (
     <section className="project-section">
-      <h2>CREATE PROJECT</h2>
-      <form className="project-form" onSubmit={onCreate}>
-        <select
-          value={newProject.service_type}
-          onChange={(event) => setNewProject((prev) => ({ ...prev, service_type: event.target.value }))}
-        >
-          <option value="web">web service</option>
-          <option value="worker">worker service</option>
-        </select>
-        <input
-          placeholder="name"
-          value={newProject.name}
-          onChange={(event) => setNewProject((prev) => ({ ...prev, name: event.target.value }))}
-          required
-        />
-        <input
-          placeholder="git url"
-          value={newProject.git_url}
-          onChange={(event) => setNewProject((prev) => ({ ...prev, git_url: event.target.value }))}
-          required
-        />
-        <input
-          placeholder="local path (example: /srv/apps/myapp)"
-          value={newProject.local_path}
-          onChange={(event) => setNewProject((prev) => ({ ...prev, local_path: event.target.value }))}
-          required
-        />
-        <input
-          placeholder="tech stack (node/python/other)"
-          value={newProject.tech_stack}
-          onChange={(event) => setNewProject((prev) => ({ ...prev, tech_stack: event.target.value }))}
-          required
-        />
-        <input
-          placeholder="start command (optional, can be auto)"
-          value={newProject.start_command}
-          onChange={(event) => setNewProject((prev) => ({ ...prev, start_command: event.target.value }))}
-        />
-        <input
-          placeholder="build command (optional)"
-          value={newProject.build_command}
-          onChange={(event) => setNewProject((prev) => ({ ...prev, build_command: event.target.value }))}
-        />
-        <input
-          placeholder="internal port (optional, auto if empty)"
-          type="number"
-          min="1"
-          max="65535"
-          value={newProject.internal_port}
-          onChange={(event) => setNewProject((prev) => ({ ...prev, internal_port: event.target.value }))}
-        />
-        <input
-          placeholder="domain (web only)"
-          value={newProject.domain}
-          onChange={(event) => setNewProject((prev) => ({ ...prev, domain: event.target.value }))}
-          disabled={newProject.service_type === "worker"}
-        />
-        <button type="submit" className="auth-btn" disabled={creatingProject}>
-          {creatingProject ? "creating..." : "create project"}
+      <h2>CREATE PROJECT (WIZARD)</h2>
+      <div className="wizard-steps" role="tablist" aria-label="create project steps">
+        <button type="button" className={`wizard-step ${wizardStep === 1 ? "active" : ""}`} onClick={() => setWizardStep(1)}>
+          1. Import
         </button>
+        <button type="button" className={`wizard-step ${wizardStep === 2 ? "active" : ""}`} onClick={() => setWizardStep(2)}>
+          2. Runtime
+        </button>
+        <button type="button" className={`wizard-step ${wizardStep === 3 ? "active" : ""}`} onClick={() => setWizardStep(3)}>
+          3. Review
+        </button>
+      </div>
+
+      <form className="project-form" onSubmit={onCreate}>
+        {wizardStep === 1 ? (
+          <>
+            <select
+              value={newProject.service_type}
+              onChange={(event) => setNewProject((prev) => ({ ...prev, service_type: event.target.value }))}
+            >
+              <option value="web">web service</option>
+              <option value="worker">worker service</option>
+            </select>
+            <input
+              placeholder="name"
+              value={newProject.name}
+              onChange={(event) => setNewProject((prev) => ({ ...prev, name: event.target.value }))}
+              required
+            />
+            <input
+              placeholder="git url"
+              value={newProject.git_url}
+              onChange={(event) => setNewProject((prev) => ({ ...prev, git_url: event.target.value }))}
+              required
+            />
+            <button type="button" className="ghost-btn" onClick={onAnalyze} disabled={analyzeBusy}>
+              {analyzeBusy ? "analyzing..." : "analyze import"}
+            </button>
+            <button type="button" className="ghost-btn" onClick={onLoadImportPaths} disabled={loadingImportPaths}>
+              {loadingImportPaths ? "loading paths..." : "scan local paths"}
+            </button>
+            {importPaths.length ? (
+              <input
+                placeholder="filter discovered paths"
+                value={importFilter}
+                onChange={(event) => setImportFilter(event.target.value)}
+              />
+            ) : null}
+            {importPaths.length ? (
+              <select
+                value={newProject.local_path}
+                onChange={(event) => setNewProject((prev) => ({ ...prev, local_path: event.target.value }))}
+              >
+                {importPaths
+                  .filter((path) => path.toLowerCase().includes(importFilter.trim().toLowerCase()))
+                  .slice(0, 120)
+                  .map((path) => (
+                    <option key={path} value={path}>
+                      {path}
+                    </option>
+                  ))}
+              </select>
+            ) : null}
+            {analyzedInfo?.suggested_local_paths?.length ? (
+              <select
+                value={newProject.local_path}
+                onChange={(event) => setNewProject((prev) => ({ ...prev, local_path: event.target.value }))}
+              >
+                {analyzedInfo.suggested_local_paths.map((path) => (
+                  <option key={path} value={path}>
+                    {path}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                placeholder="local path (example: /srv/apps/myapp)"
+                value={newProject.local_path}
+                onChange={(event) => setNewProject((prev) => ({ ...prev, local_path: event.target.value }))}
+                required
+              />
+            )}
+            {analyzedInfo ? (
+              <input
+                value={`stack=${analyzedInfo.detected_stack || "unknown"} framework=${analyzedInfo.detected_python_framework || "n/a"} next_port=${analyzedInfo.suggested_port}`}
+                readOnly
+              />
+            ) : null}
+          </>
+        ) : null}
+
+        {wizardStep === 2 ? (
+          <>
+            <select
+              value={newProject.tech_stack}
+              onChange={(event) => onStackPreset(event.target.value)}
+              required
+            >
+              <option value="node">node</option>
+              <option value="python">python</option>
+              <option value="other">other</option>
+            </select>
+            <input
+              placeholder="build command (optional)"
+              value={newProject.build_command}
+              onChange={(event) => setNewProject((prev) => ({ ...prev, build_command: event.target.value }))}
+            />
+            {isPython ? (
+              <input value={newProject.start_command || "auto-generated for detected python framework"} readOnly />
+            ) : (
+              <input
+                placeholder="start command (optional, can be auto)"
+                value={newProject.start_command}
+                onChange={(event) => setNewProject((prev) => ({ ...prev, start_command: event.target.value }))}
+              />
+            )}
+            <input
+              placeholder="internal port (optional, auto if empty)"
+              type="number"
+              min="1"
+              max="65535"
+              value={newProject.internal_port}
+              onChange={(event) => setNewProject((prev) => ({ ...prev, internal_port: event.target.value }))}
+            />
+            <input
+              placeholder="domain (web only)"
+              value={newProject.domain}
+              onChange={(event) => setNewProject((prev) => ({ ...prev, domain: event.target.value }))}
+              disabled={newProject.service_type === "worker"}
+            />
+          </>
+        ) : null}
+
+        {wizardStep === 3 ? (
+          <>
+            <input value={`name=${newProject.name}`} readOnly />
+            <input value={`service=${newProject.service_type}`} readOnly />
+            <input value={`repo=${newProject.git_url}`} readOnly />
+            <input value={`path=${newProject.local_path}`} readOnly />
+            <input value={`stack=${newProject.tech_stack}`} readOnly />
+            <input value={`build=${newProject.build_command || "(none)"}`} readOnly />
+            <input value={`start=${newProject.start_command || "(auto)"}`} readOnly />
+            <input value={`port=${newProject.internal_port || "auto"}`} readOnly />
+            <input value={`domain=${newProject.domain || "(none)"}`} readOnly />
+          </>
+        ) : null}
+
+        <div className="wizard-nav">
+          <button type="button" className="ghost-btn" onClick={goPrev} disabled={wizardStep === 1}>
+            back
+          </button>
+          {wizardStep < 3 ? (
+            <button type="button" className="ghost-btn" onClick={goNext}>
+              next
+            </button>
+          ) : (
+            <button type="submit" className="auth-btn" disabled={creatingProject}>
+              {creatingProject ? "creating..." : "create project"}
+            </button>
+          )}
+        </div>
       </form>
 
       <h2>PROJECTS ({projects.length})</h2>
@@ -465,6 +610,16 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
                 <p>branch: {item.branch} • started: {formatWhen(item.started_at)} • finished: {formatWhen(item.completed_at)}</p>
                 {item.error_message ? <p className="error-text">{item.error_message}</p> : null}
               </div>
+              <div className="project-actions">
+                <button
+                  className="ghost-btn"
+                  type="button"
+                  onClick={() => handleHeaderAction("deploy")}
+                  disabled={busyAction === `deploy:${project.id}`}
+                >
+                  retry deploy
+                </button>
+              </div>
             </article>
           ))}
           {!deployments.length ? <div className="error-banner">No deployments yet.</div> : null}
@@ -603,6 +758,12 @@ export default function App() {
   const [error, setError] = useState("");
   const [busyAction, setBusyAction] = useState("");
   const [creatingProject, setCreatingProject] = useState(false);
+  const [analyzeBusy, setAnalyzeBusy] = useState(false);
+  const [analyzedInfo, setAnalyzedInfo] = useState(null);
+  const [wizardStep, setWizardStep] = useState(1);
+  const [importPaths, setImportPaths] = useState([]);
+  const [loadingImportPaths, setLoadingImportPaths] = useState(false);
+  const [importFilter, setImportFilter] = useState("");
   const [newProject, setNewProject] = useState({
     service_type: "web",
     name: "",
@@ -698,11 +859,83 @@ export default function App() {
         build_command: "",
         domain: "",
       });
+      setAnalyzedInfo(null);
+      setWizardStep(1);
     } catch (err) {
       setError(err.message || "Project creation failed");
     } finally {
       setCreatingProject(false);
     }
+  }
+
+  async function handleAnalyzeImport() {
+    try {
+      setError("");
+      setAnalyzeBusy(true);
+      const analyzed = await analyzeProjectImport(token, {
+        git_url: newProject.git_url.trim() || null,
+        local_path: newProject.local_path.trim() || null,
+        tech_stack: newProject.tech_stack.trim() || null,
+        service_type: newProject.service_type,
+      });
+      setAnalyzedInfo(analyzed);
+
+      setNewProject((prev) => ({
+        ...prev,
+        local_path: prev.local_path || analyzed.suggested_local_paths?.[0] || "",
+        tech_stack: analyzed.detected_stack || prev.tech_stack,
+        build_command: prev.build_command || analyzed.suggested_build_command || "",
+        start_command: prev.start_command || analyzed.suggested_start_command || "",
+        internal_port: prev.internal_port || String(analyzed.suggested_port || ""),
+      }));
+    } catch (err) {
+      setError(err.message || "Analyze failed");
+    } finally {
+      setAnalyzeBusy(false);
+    }
+  }
+
+  async function handleLoadImportPaths() {
+    try {
+      setError("");
+      setLoadingImportPaths(true);
+      const result = await listImportPaths(token);
+      setImportPaths(result?.discovered_paths || []);
+      if (!newProject.local_path && result?.discovered_paths?.length) {
+        setNewProject((prev) => ({ ...prev, local_path: result.discovered_paths[0] }));
+      }
+    } catch (err) {
+      setError(err.message || "Path scan failed");
+    } finally {
+      setLoadingImportPaths(false);
+    }
+  }
+
+  function applyStackPreset(stackValue) {
+    const normalized = (stackValue || "").toLowerCase();
+    const suggestedPort = Number(newProject.internal_port || analyzedInfo?.suggested_port || 8000);
+
+    setNewProject((prev) => {
+      const next = { ...prev, tech_stack: normalized || prev.tech_stack };
+
+      if (normalized === "python") {
+        if (!next.start_command) {
+          next.start_command = analyzedInfo?.suggested_start_command || `uvicorn app.main:app --host 0.0.0.0 --port ${suggestedPort}`;
+        }
+        if (!next.build_command) {
+          next.build_command = analyzedInfo?.suggested_build_command || "";
+        }
+      } else if (normalized === "node") {
+        if (!next.build_command) {
+          next.build_command = "npm run build";
+        }
+        if (!next.start_command) {
+          next.start_command = next.service_type === "worker" ? "node worker.js" : "npm start";
+        }
+      }
+
+      return next;
+    });
   }
 
   async function handleProjectAction(action, project) {
@@ -783,6 +1016,17 @@ export default function App() {
                   creatingProject={creatingProject}
                   onCreate={handleCreateProject}
                   onAction={handleProjectAction}
+                  onAnalyze={handleAnalyzeImport}
+                  analyzeBusy={analyzeBusy}
+                  analyzedInfo={analyzedInfo}
+                  wizardStep={wizardStep}
+                  setWizardStep={setWizardStep}
+                  importPaths={importPaths}
+                  loadingImportPaths={loadingImportPaths}
+                  importFilter={importFilter}
+                  setImportFilter={setImportFilter}
+                  onLoadImportPaths={handleLoadImportPaths}
+                  onStackPreset={applyStackPreset}
                 />
               }
             />

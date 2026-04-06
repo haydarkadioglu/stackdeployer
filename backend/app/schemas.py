@@ -103,6 +103,29 @@ class NextPortOut(BaseModel):
     next_port: int
 
 
+class ImportPathsOut(BaseModel):
+    base_paths: list[str]
+    discovered_paths: list[str]
+
+
+class ProjectImportAnalyzeRequest(BaseModel):
+    git_url: str | None = Field(default=None, max_length=1000)
+    local_path: str | None = Field(default=None, max_length=1000)
+    tech_stack: str | None = Field(default=None, max_length=64)
+    service_type: Literal["web", "worker"] = "web"
+
+
+class ProjectImportAnalyzeOut(BaseModel):
+    suggested_project_name: str | None
+    suggested_local_paths: list[str]
+    conflicting_paths: list[str]
+    detected_stack: str | None
+    detected_python_framework: str | None
+    suggested_build_command: str | None
+    suggested_start_command: str | None
+    suggested_port: int
+
+
 class NginxApplyRequest(BaseModel):
     site_name: str = Field(min_length=2, max_length=120)
     domain: str = Field(min_length=4, max_length=255)

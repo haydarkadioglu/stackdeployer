@@ -3,3 +3,4 @@ uvicorn[standard]==0.34.0
 SQLAlchemy==2.0.40
 pydantic-settings==2.8.1
 alembic==1.15.2
+PyJWT==2.10.1

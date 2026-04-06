@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..auth import require_admin
 from ..database import get_db
 from ..executor import DeploymentPlan, Executor, ExecutorError
 from ..models import Log, Project
@@ -19,7 +20,7 @@ from ..schemas import (
     ProjectUpdate,
 )
 
-router = APIRouter(prefix="/api/v1/projects", tags=["projects"])
+router = APIRouter(prefix="/api/v1/projects", tags=["projects"], dependencies=[Depends(require_admin)])
 executor = Executor()
 nginx_manager = NginxManager()
 

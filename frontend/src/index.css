@@ -208,6 +208,44 @@ body {
   margin-top: 14px;
 }
 
+.detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.detail-meta {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.tab-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tab-link {
+  border: 1px solid hsl(41 16% 41%);
+  background: hsl(39 7% 15%);
+  color: hsl(40 20% 86%);
+  border-radius: 10px;
+  padding: 8px 12px;
+  text-decoration: none;
+  text-transform: capitalize;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.tab-link.active {
+  border-color: hsl(44 71% 58%);
+  color: hsl(43 88% 72%);
+}
+
 h2 {
   font-size: 0.83rem;
   letter-spacing: 0.08em;

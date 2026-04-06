@@ -69,6 +69,10 @@ export async function listProjects(token) {
   return request("/api/v1/projects", { token });
 }
 
+export async function getProject(token, projectId) {
+  return request(`/api/v1/projects/${projectId}`, { token });
+}
+
 export async function createProject(token, payload) {
   return request("/api/v1/projects", {
     method: "POST",
@@ -79,6 +83,49 @@ export async function createProject(token, payload) {
 
 export async function getProjectLogs(token, projectId, limit = 200) {
   return request(`/api/v1/projects/${projectId}/logs?limit=${limit}`, { token });
+}
+
+export async function listProjectDeployments(token, projectId, limit = 50) {
+  return request(`/api/v1/projects/${projectId}/deployments?limit=${limit}`, { token });
+}
+
+export async function listProjectEnvironment(token, projectId, revealSecrets = false) {
+  return request(`/api/v1/projects/${projectId}/env?reveal_secrets=${revealSecrets}`, { token });
+}
+
+export async function createProjectEnvironment(token, projectId, payload) {
+  return request(`/api/v1/projects/${projectId}/env`, {
+    method: "POST",
+    token,
+    body: payload,
+  });
+}
+
+export async function updateProjectEnvironment(token, projectId, envId, payload) {
+  return request(`/api/v1/projects/${projectId}/env/${envId}`, {
+    method: "PATCH",
+    token,
+    body: payload,
+  });
+}
+
+export async function deleteProjectEnvironment(token, projectId, envId) {
+  return request(`/api/v1/projects/${projectId}/env/${envId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export async function updateProject(token, projectId, payload) {
+  return request(`/api/v1/projects/${projectId}`, {
+    method: "PATCH",
+    token,
+    body: payload,
+  });
+}
+
+export async function getNextPort(token, startPort = 8000) {
+  return request(`/api/v1/projects/ports/next?start_port=${startPort}`, { token });
 }
 
 export async function deployProject(token, projectId) {

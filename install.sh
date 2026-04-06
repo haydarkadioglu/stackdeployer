@@ -95,7 +95,11 @@ ensure_node() {
 
   log "Installing Node.js 18.x from NodeSource"
   $SUDO apt-get install -y ca-certificates curl gnupg
-  curl -fsSL https://deb.nodesource.com/setup_18.x | $SUDO -E bash -
+  if [[ -n "$SUDO" ]]; then
+    curl -fsSL https://deb.nodesource.com/setup_18.x | $SUDO -E bash -
+  else
+    curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
+  fi
   $SUDO apt-get install -y nodejs
 
   local node_ver

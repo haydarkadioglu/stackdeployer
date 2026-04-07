@@ -7,6 +7,7 @@ import platform
 import re
 import shutil
 import sys
+import tempfile
 import threading
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -25,6 +26,14 @@ executor = Executor()
 update_lock = threading.Lock()
 BRANCH_PATTERN = re.compile(r"^[A-Za-z0-9._/-]+$")
 SERVICE_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_.@-]+$")
+CHECKOUT_CONFLICT_MARKERS = (
+    "would be overwritten by checkout",
+    "please move or remove them before you switch branches",
+)
+PROTECTED_FILES_FOR_CLEAN = (
+    Path("backend/.env"),
+    Path("backend/stackdeployer.db"),
+)
 
 
 def _as_out(result: CommandResult) -> CommandResultOut:
@@ -34,6 +43,35 @@ def _as_out(result: CommandResult) -> CommandResultOut:
         stdout=result.stdout,
         stderr=result.stderr,
     )
+
+
+def _backup_protected_files(repo_root: Path) -> dict[Path, Path]:
+    backups: dict[Path, Path] = {}
+    for rel_path in PROTECTED_FILES_FOR_CLEAN:
+        source = repo_root / rel_path
+        if not source.exists() or not source.is_file():
+            continue
+
+        temp_file = tempfile.NamedTemporaryFile(prefix="stackdeployer-selfupdate-", delete=False)
+        temp_file.close()
+        backup_path = Path(temp_file.name)
+        shutil.copy2(source, backup_path)
+        backups[source] = backup_path
+    return backups
+
+
+def _restore_protected_files(backups: dict[Path, Path]) -> None:
+    for source, backup in backups.items():
+        try:
+            source.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(backup, source)
+        finally:
+            backup.unlink(missing_ok=True)
+
+
+def _is_checkout_conflict_error(exc: ExecutorError) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in CHECKOUT_CONFLICT_MARKERS)
 
 
 def _probe_pm2() -> SystemServiceStatusOut:
@@ -144,9 +182,25 @@ def run_self_update(payload: SelfUpdateRequest) -> SelfUpdateResultOut:
         executor._ensure_success(fetch_result, "git fetch failed")
         steps.append(_as_out(fetch_result))
 
-        checkout_result = executor.run(["git", "checkout", branch], cwd=repo_root)
-        executor._ensure_success(checkout_result, f"git checkout {branch} failed")
-        steps.append(_as_out(checkout_result))
+        try:
+            checkout_result = executor.run(["git", "checkout", branch], cwd=repo_root)
+            executor._ensure_success(checkout_result, f"git checkout {branch} failed")
+            steps.append(_as_out(checkout_result))
+        except ExecutorError as exc:
+            if not _is_checkout_conflict_error(exc):
+                raise
+
+            backups = _backup_protected_files(repo_root)
+            try:
+                clean_result = executor.run(["git", "clean", "-fd"], cwd=repo_root)
+                executor._ensure_success(clean_result, "git clean -fd failed")
+                steps.append(_as_out(clean_result))
+
+                checkout_force_result = executor.run(["git", "checkout", "-B", branch, f"origin/{branch}"], cwd=repo_root)
+                executor._ensure_success(checkout_force_result, f"git checkout -B {branch} origin/{branch} failed")
+                steps.append(_as_out(checkout_force_result))
+            finally:
+                _restore_protected_files(backups)
 
         pull_result = executor.run(["git", "pull", "--ff-only", "origin", branch], cwd=repo_root)
         executor._ensure_success(pull_result, f"git pull origin {branch} failed")

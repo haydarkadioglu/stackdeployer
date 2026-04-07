@@ -491,6 +491,69 @@ def test_self_update_endpoint_runs_git_pull_flow(client, monkeypatch, tmp_path) 
     assert calls[2][0] == ["git", "pull", "--ff-only", "origin", "main"]
 
 
+def test_self_update_recovers_from_untracked_checkout_conflict(client, monkeypatch, tmp_path) -> None:
+    bootstrap_admin(client)
+    headers = login_and_get_headers(client)
+
+    from app import config as app_config
+    from app.executor import CommandResult
+    from app.routers import system as system_router
+
+    repo_root = tmp_path / "stackdeployer"
+    repo_root.mkdir(parents=True, exist_ok=True)
+    (repo_root / ".git").mkdir(exist_ok=True)
+    backend_root = repo_root / "backend"
+    backend_root.mkdir(exist_ok=True)
+    (backend_root / ".env").write_text("jwt_secret=test", encoding="utf-8")
+
+    monkeypatch.setattr(app_config.settings, "self_update_enabled", True)
+    monkeypatch.setattr(app_config.settings, "self_update_repo_root", str(repo_root))
+    monkeypatch.setattr(app_config.settings, "self_update_default_branch", "main")
+
+    calls = []
+    checkout_attempts = {"count": 0}
+
+    conflict_message = (
+        "error: The following untracked working tree files would be overwritten by checkout:\n"
+        "backend/app/main.py\n"
+        "Please move or remove them before you switch branches.\n"
+        "Aborting"
+    )
+
+    def fake_run(args, cwd=None, timeout=None, stream=None):
+        _ = timeout, stream
+        calls.append((list(args), str(cwd) if cwd else None))
+
+        if list(args) == ["git", "checkout", "main"] and checkout_attempts["count"] == 0:
+            checkout_attempts["count"] += 1
+            return CommandResult(command=list(args), returncode=1, stdout="", stderr=conflict_message)
+
+        return CommandResult(command=list(args), returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(system_router.executor, "run", fake_run)
+
+    response = client.post(
+        "/api/v1/system/self-update",
+        headers=headers,
+        json={
+            "branch": "main",
+            "install_backend_dependencies": False,
+            "run_migrations": False,
+            "rebuild_frontend": False,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["status"] == "ok"
+    assert payload["branch"] == "main"
+    assert calls[0][0] == ["git", "fetch", "origin"]
+    assert ["git", "clean", "-fd"] in [entry[0] for entry in calls]
+    assert ["git", "checkout", "-B", "main", "origin/main"] in [entry[0] for entry in calls]
+    assert calls[-1][0] == ["git", "pull", "--ff-only", "origin", "main"]
+    assert (backend_root / ".env").exists()
+
+
 def test_create_project_assigns_auto_domain(client, monkeypatch) -> None:
     bootstrap_admin(client)
     headers = login_and_get_headers(client)

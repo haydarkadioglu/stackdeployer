@@ -554,6 +554,62 @@ h2 {
   width: 100%;
 }
 
+.auth-help-toggle {
+  width: 100%;
+  margin-top: 8px;
+  border: 1px solid hsl(41 16% 41%);
+  background: hsl(39 8% 16%);
+  color: hsl(40 20% 86%);
+  border-radius: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.82rem;
+}
+
+.auth-help-toggle:hover {
+  background: hsl(39 8% 19%);
+}
+
+.auth-help-panel {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: hsl(35 10% 12% / 0.9);
+  padding: 12px;
+}
+
+.auth-help-panel h2 {
+  margin: 0 0 8px;
+  font-size: 0.86rem;
+  letter-spacing: 0.08em;
+}
+
+.auth-help-panel ol {
+  margin: 0;
+  padding-left: 18px;
+  color: hsl(40 17% 82%);
+  display: grid;
+  gap: 6px;
+  font-size: 0.86rem;
+}
+
+.auth-help-links {
+  margin-top: 10px;
+  display: grid;
+  gap: 7px;
+}
+
+.auth-help-links a {
+  color: hsl(43 88% 72%);
+  text-decoration: none;
+  font-size: 0.84rem;
+}
+
+.auth-help-links a:hover {
+  text-decoration: underline;
+}
+
 .auth-btn:hover:enabled {
   background: hsl(42 82% 62%);
 }

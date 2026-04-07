@@ -5,6 +5,8 @@ APP_ROOT="${APP_ROOT:-/opt/stackdeployer}"
 APP_PORT="${APP_PORT:-8001}"
 PANEL_SERVER_NAME="${PANEL_SERVER_NAME:-_}"
 CERTBOT_EMAIL="${CERTBOT_EMAIL:-}"
+DEPLOYER_REPO_URL="${DEPLOYER_REPO_URL:-https://github.com/haydarkadioglu/stackdeployer.git}"
+DEPLOYER_REPO_BRANCH="${DEPLOYER_REPO_BRANCH:-main}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_SRC_DIR="${SCRIPT_DIR}/backend"
 BACKEND_DST_DIR="${APP_ROOT}/backend"
@@ -143,8 +145,22 @@ PY
 sync_backend_files() {
   log "Syncing backend source to ${BACKEND_DST_DIR}"
   $SUDO mkdir -p "$APP_ROOT"
-  $SUDO mkdir -p "$BACKEND_DST_DIR"
-  $SUDO cp -a "${BACKEND_SRC_DIR}/." "$BACKEND_DST_DIR/"
+  
+  # If deployer repo is cloned locally, copy from it
+  if [[ -d "${BACKEND_SRC_DIR}/.git" ]]; then
+    log "Using local deployer repository for backend"
+    (
+      cd "$BACKEND_SRC_DIR"
+      git rev-parse HEAD > /tmp/backend_commit.txt
+    )
+    $SUDO mkdir -p "$BACKEND_DST_DIR"
+    $SUDO cp -a "${BACKEND_SRC_DIR}/." "$BACKEND_DST_DIR/"
+    $SUDO cp /tmp/backend_commit.txt "$BACKEND_DST_DIR/.git_commit" 2>/dev/null || true
+  else
+    # Fallback: direct copy from script directory
+    $SUDO mkdir -p "$BACKEND_DST_DIR"
+    $SUDO cp -a "${BACKEND_SRC_DIR}/." "$BACKEND_DST_DIR/"
+  fi
 }
 
 sync_frontend_files() {
@@ -156,6 +172,38 @@ sync_frontend_files() {
   log "Syncing frontend source to ${FRONTEND_DST_DIR}"
   $SUDO mkdir -p "$FRONTEND_DST_DIR"
   $SUDO cp -a "${FRONTEND_SRC_DIR}/." "$FRONTEND_DST_DIR/"
+}
+
+init_git_repo() {
+  log "Initializing git repository at ${APP_ROOT}"
+  
+  if [[ ! -d "${APP_ROOT}/.git" ]]; then
+    if [[ -d "$BACKEND_SRC_DIR/.git" ]]; then
+      # If source is a git repo, copy it
+      log "Copying .git from source repository"
+      $SUDO cp -a "${BACKEND_SRC_DIR}/.git" "${APP_ROOT}/.git" || true
+    else
+      # Otherwise, initialize a new git repo and fetch from remote
+      log "Initializing new git repository at ${APP_ROOT}"
+      $SUDO mkdir -p "${APP_ROOT}/.git"
+      
+      # Use git directly (git handles sudo better than sudo git)
+      if [[ -n "$SUDO" ]]; then
+        pushd "$APP_ROOT" >/dev/null
+        $SUDO bash -c "cd '$APP_ROOT' && git init && git remote add origin '$DEPLOYER_REPO_URL' && git fetch origin '$DEPLOYER_REPO_BRANCH' && git checkout -B '$DEPLOYER_REPO_BRANCH' 'origin/$DEPLOYER_REPO_BRANCH'" 2>/dev/null || log "WARNING: Failed to initialize git repo. Self-update may not work."
+        popd >/dev/null
+      else
+        pushd "$APP_ROOT" >/dev/null
+        git init
+        git remote add origin "$DEPLOYER_REPO_URL"
+        git fetch origin "$DEPLOYER_REPO_BRANCH"
+        git checkout -B "$DEPLOYER_REPO_BRANCH" "origin/$DEPLOYER_REPO_BRANCH" || log "WARNING: Failed to checkout branch"
+        popd >/dev/null
+      fi
+    fi
+  else
+    log "Git repository already initialized at ${APP_ROOT}"
+  fi
 }
 
 setup_python_env() {
@@ -318,6 +366,7 @@ main() {
 
   sync_backend_files
   sync_frontend_files
+  init_git_repo
   setup_python_env
   write_env_file
   run_migrations

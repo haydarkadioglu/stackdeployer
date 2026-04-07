@@ -89,6 +89,13 @@ export async function createProject(token, payload) {
   });
 }
 
+export async function deleteProject(token, projectId) {
+  return request(`/api/v1/projects/${projectId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
 export async function getProjectLogs(token, projectId, limit = 200) {
   return request(`/api/v1/projects/${projectId}/logs?limit=${limit}`, { token });
 }

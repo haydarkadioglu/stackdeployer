@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 
 import {
   analyzeProjectImport,
   applyNginxRoute,
   createProject,
   createProjectEnvironment,
+  deleteProject,
   deleteProjectEnvironment,
   deleteProjectDeployment,
   deployProject,
@@ -123,6 +124,7 @@ function ProjectsIndexPage({
   projects,
   systemInfo,
   busyAction,
+  showWizard = false,
   newProject,
   setNewProject,
   creatingProject,
@@ -194,8 +196,15 @@ function ProjectsIndexPage({
     setWizardStep((prev) => Math.max(prev - 1, 1));
   }
 
+  async function handleCreateSubmit(event) {
+    const created = await onCreate(event);
+    if (created && showWizard) {
+      navigate("/projects");
+    }
+  }
+
   return (
-    <section className="project-section">
+    <section className="project-section project-index-compact">
       {systemInfo ? (
         <div className="stats-grid" style={{ marginBottom: 12 }}>
           <article className="metric-card">
@@ -216,20 +225,27 @@ function ProjectsIndexPage({
         </div>
       ) : null}
 
-      <h2>CREATE PROJECT (WIZARD)</h2>
-      <div className="wizard-steps" role="tablist" aria-label="create project steps">
-        <button type="button" className={`wizard-step ${wizardStep === 1 ? "active" : ""}`} onClick={() => setWizardStep(1)}>
-          1. Import
-        </button>
-        <button type="button" className={`wizard-step ${wizardStep === 2 ? "active" : ""}`} onClick={() => setWizardStep(2)}>
-          2. Runtime
-        </button>
-        <button type="button" className={`wizard-step ${wizardStep === 3 ? "active" : ""}`} onClick={() => setWizardStep(3)}>
-          3. Review
-        </button>
-      </div>
+      {showWizard ? (
+        <>
+          <div className="project-actions" style={{ marginBottom: 12 }}>
+            <button className="ghost-btn" type="button" onClick={() => navigate("/projects")}>
+              all projects
+            </button>
+          </div>
+          <h2>CREATE PROJECT (WIZARD)</h2>
+          <div className="wizard-steps" role="tablist" aria-label="create project steps">
+            <button type="button" className={`wizard-step ${wizardStep === 1 ? "active" : ""}`} onClick={() => setWizardStep(1)}>
+              1. Import
+            </button>
+            <button type="button" className={`wizard-step ${wizardStep === 2 ? "active" : ""}`} onClick={() => setWizardStep(2)}>
+              2. Runtime
+            </button>
+            <button type="button" className={`wizard-step ${wizardStep === 3 ? "active" : ""}`} onClick={() => setWizardStep(3)}>
+              3. Review
+            </button>
+          </div>
 
-      <form className="project-form" onSubmit={onCreate}>
+          <form className="project-form" onSubmit={handleCreateSubmit}>
         {wizardStep === 1 ? (
           <>
             <select
@@ -409,32 +425,56 @@ function ProjectsIndexPage({
             </button>
           )}
         </div>
-      </form>
+          </form>
+        </>
+      ) : (
+        <div className="project-actions" style={{ marginBottom: 12 }}>
+          <button className="auth-btn" type="button" onClick={() => navigate("/projects/new")}>
+            yeni proje olustur
+          </button>
+        </div>
+      )}
 
-      <h2>PROJECTS ({projects.length})</h2>
-      <div className="project-list">
-        {projects.map((project) => (
-          <article key={project.id} className={`project-row ${project.status === "building" ? "project-building" : ""}`}>
-            <div className="project-main">
-              <div className="project-title-wrap">
-                <h3>{project.name}</h3>
-                <StatusBadge status={project.status} />
-              </div>
-              <p>
-                {project.tech_stack} • {project.service_type} • {project.internal_port ? `port ${project.internal_port}` : "no port"} • {project.domain || "no domain"}
-              </p>
-            </div>
-            <div className="project-actions">
-              <button className="ghost-btn" type="button" onClick={() => navigate(`/projects/${project.id}`)}>
-                open
-              </button>
-              <button className="ghost-btn" type="button" onClick={() => onAction("deploy", project)} disabled={busyAction === `deploy:${project.id}`}>
-                deploy
-              </button>
-            </div>
-          </article>
-        ))}
-      </div>
+      {!showWizard ? (
+        <>
+          <h2>PROJECTS ({projects.length})</h2>
+          <div className="project-list">
+            {projects.map((project) => (
+              <article key={project.id} className={`project-row ${project.status === "building" ? "project-building" : ""}`}>
+                <div className="project-main">
+                  <div className="project-title-wrap">
+                    <h3>{project.name}</h3>
+                    <StatusBadge status={project.status} />
+                  </div>
+                  <p>
+                    {project.tech_stack} • {project.service_type} • {project.internal_port ? `port ${project.internal_port}` : "no port"} • {project.domain || "no domain"}
+                  </p>
+                </div>
+                <div className="project-actions">
+                  <button className="ghost-btn" type="button" onClick={() => navigate(`/projects/${project.id}`)}>
+                    open
+                  </button>
+                  <button className="ghost-btn" type="button" onClick={() => onAction("deploy", project)} disabled={busyAction === `deploy:${project.id}`}>
+                    deploy
+                  </button>
+                  <button
+                    className="ghost-btn"
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Delete project ${project.name}? This action cannot be undone.`)) {
+                        onAction("delete", project);
+                      }
+                    }}
+                    disabled={busyAction === `delete:${project.id}`}
+                  >
+                    delete
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        </>
+      ) : null}
     </section>
   );
 }
@@ -811,6 +851,20 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
     } catch (err) {
       setGlobalError(err.message || "Settings save failed");
     }
+  }
+
+  async function handleDeleteProject() {
+    if (!project) {
+      return;
+    }
+
+    const ok = window.confirm(`Delete project ${project.name}? This action cannot be undone.`);
+    if (!ok) {
+      return;
+    }
+
+    await onAction("delete", project);
+    navigate("/projects");
   }
 
   const isSettingsDirty = initialSettingsSnapshot && JSON.stringify(settingsForm) !== initialSettingsSnapshot;
@@ -1190,6 +1244,14 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
               onChange={(event) => setSettingsForm((prev) => ({ ...prev, start_command: event.target.value }))}
             />
             <button type="submit" className="auth-btn" disabled={!isSettingsDirty}>save settings</button>
+            <button
+              type="button"
+              className="ghost-btn"
+              onClick={handleDeleteProject}
+              disabled={busyAction === `delete:${project.id}`}
+            >
+              delete project
+            </button>
           </form>
         </>
       ) : null}
@@ -1423,6 +1485,7 @@ function GeneralSettingsPage({ token, setGlobalError }) {
 }
 
 export default function App() {
+  const location = useLocation();
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || "");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -1449,6 +1512,10 @@ export default function App() {
     build_command: "",
     domain: "",
   });
+
+  useEffect(() => {
+    setError("");
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!token) {
@@ -1544,8 +1611,10 @@ export default function App() {
       });
       setAnalyzedInfo(null);
       setWizardStep(1);
+      return true;
     } catch (err) {
       setError(err.message || "Project creation failed");
+      return false;
     } finally {
       setCreatingProject(false);
     }
@@ -1647,6 +1716,8 @@ export default function App() {
         await startProject(token, project.id);
       } else if (action === "stop") {
         await stopProject(token, project.id);
+      } else if (action === "delete") {
+        await deleteProject(token, project.id);
       }
       await refreshProjects();
     } catch (err) {
@@ -1688,6 +1759,9 @@ export default function App() {
             <NavLink to="/projects" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
               All Projects
             </NavLink>
+            <NavLink to="/projects/new" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
+              Yeni Proje
+            </NavLink>
             <NavLink to="/account" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
               Account
             </NavLink>
@@ -1718,6 +1792,35 @@ export default function App() {
                   projects={projects}
                   systemInfo={systemInfo}
                   busyAction={busyAction}
+                  showWizard={false}
+                  newProject={newProject}
+                  setNewProject={setNewProject}
+                  creatingProject={creatingProject}
+                  onCreate={handleCreateProject}
+                  onAction={handleProjectAction}
+                  onAnalyze={handleAnalyzeImport}
+                  analyzeBusy={analyzeBusy}
+                  analyzedInfo={analyzedInfo}
+                  wizardStep={wizardStep}
+                  setWizardStep={setWizardStep}
+                  importPaths={importPaths}
+                  loadingImportPaths={loadingImportPaths}
+                  importFilter={importFilter}
+                  setImportFilter={setImportFilter}
+                  onLoadImportPaths={handleLoadImportPaths}
+                  onStackPreset={applyStackPreset}
+                  onApplySuggestedName={applySuggestedName}
+                />
+              }
+            />
+            <Route
+              path="/projects/new"
+              element={
+                <ProjectsIndexPage
+                  projects={projects}
+                  systemInfo={systemInfo}
+                  busyAction={busyAction}
+                  showWizard
                   newProject={newProject}
                   setNewProject={setNewProject}
                   creatingProject={creatingProject}

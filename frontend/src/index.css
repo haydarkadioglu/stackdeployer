@@ -208,6 +208,23 @@ body {
   margin-top: 14px;
 }
 
+.project-index-compact {
+  max-width: 1180px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.project-index-compact .wizard-steps,
+.project-index-compact .project-form,
+.project-index-compact .project-list,
+.project-index-compact > h2,
+.project-index-compact > .project-actions,
+.project-index-compact > .stats-grid {
+  max-width: 1100px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
 .detail-header {
   display: flex;
   align-items: center;
@@ -561,6 +578,16 @@ h2 {
     width: 100%;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .project-index-compact,
+  .project-index-compact .wizard-steps,
+  .project-index-compact .project-form,
+  .project-index-compact .project-list,
+  .project-index-compact > h2,
+  .project-index-compact > .project-actions,
+  .project-index-compact > .stats-grid {
+    max-width: none;
   }
 
   .ghost-btn {

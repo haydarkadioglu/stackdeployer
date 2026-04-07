@@ -19,6 +19,7 @@ import AuthScreen from "./components/AuthScreen";
 import { TOKEN_KEY } from "./constants";
 import AccountPage from "./pages/AccountPage";
 import GeneralSettingsPage from "./pages/GeneralSettingsPage";
+import NewProjectPage from "./pages/NewProjectPage";
 import ProjectDetailPage from "./pages/ProjectDetailPage";
 import ProjectsIndexPage from "./pages/ProjectsIndexPage";
 import SystemDashboardPage from "./pages/SystemDashboardPage";
@@ -295,7 +296,7 @@ export default function App() {
         <aside className="sidebar">
           <div className="menu-group">
             <p>PROJECTS</p>
-            <NavLink to="/projects" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
+            <NavLink to="/projects" end className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
               All Projects
             </NavLink>
             <NavLink to="/account" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
@@ -328,40 +329,19 @@ export default function App() {
                   projects={projects}
                   systemInfo={systemInfo}
                   busyAction={busyAction}
-                  showWizard={false}
-                  newProject={newProject}
-                  setNewProject={setNewProject}
-                  creatingProject={creatingProject}
-                  onCreate={handleCreateProject}
                   onAction={handleProjectAction}
-                  onAnalyze={handleAnalyzeImport}
-                  analyzeBusy={analyzeBusy}
-                  analyzedInfo={analyzedInfo}
-                  wizardStep={wizardStep}
-                  setWizardStep={setWizardStep}
-                  importPaths={importPaths}
-                  loadingImportPaths={loadingImportPaths}
-                  importFilter={importFilter}
-                  setImportFilter={setImportFilter}
-                  onLoadImportPaths={handleLoadImportPaths}
-                  onStackPreset={applyStackPreset}
-                  onApplySuggestedName={applySuggestedName}
                 />
               }
             />
             <Route
               path="/projects/new"
               element={
-                <ProjectsIndexPage
+                <NewProjectPage
                   projects={projects}
-                  systemInfo={systemInfo}
-                  busyAction={busyAction}
-                  showWizard
                   newProject={newProject}
                   setNewProject={setNewProject}
                   creatingProject={creatingProject}
                   onCreate={handleCreateProject}
-                  onAction={handleProjectAction}
                   onAnalyze={handleAnalyzeImport}
                   analyzeBusy={analyzeBusy}
                   analyzedInfo={analyzedInfo}

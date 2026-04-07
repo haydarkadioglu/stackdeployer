@@ -287,7 +287,7 @@ export default function App() {
           <span className="dot yellow" />
           <span className="dot green" />
         </div>
-        <div className="host-text">{window.location.host} • {me?.username || "admin"}</div>
+        <div className="host-text">{window.location.host} | {me?.username || "admin"}</div>
         <button type="button" className="connection-pill is-down" onClick={handleLogout}>sign out</button>
       </header>
 
@@ -297,9 +297,6 @@ export default function App() {
             <p>PROJECTS</p>
             <NavLink to="/projects" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
               All Projects
-            </NavLink>
-            <NavLink to="/projects/new" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
-              Yeni Proje
             </NavLink>
             <NavLink to="/account" className={({ isActive }) => `menu-item ${isActive ? "active" : ""}`}>
               Account

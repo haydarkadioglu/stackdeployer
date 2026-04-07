@@ -34,42 +34,42 @@ export default function ProjectsIndexPage({
   const analyzedConflicts = new Set(analyzedInfo?.conflicting_paths || []);
   const selectedPathConflict = existingProjectPaths.has(newProject.local_path) || analyzedConflicts.has(newProject.local_path);
 
-  const importErrors = [];
-  if (newProject.name.trim().length <= 1) {
-    importErrors.push("project name is required");
-  }
+  const repoStepErrors = [];
   if (newProject.git_url.trim().length <= 3) {
-    importErrors.push("git url is required");
+    repoStepErrors.push("git url is required");
+  }
+
+  const configErrors = [];
+  if (newProject.name.trim().length <= 1) {
+    configErrors.push("project name is required");
   }
   if (newProject.local_path.trim().length <= 1) {
-    importErrors.push("local path is required");
+    configErrors.push("local path is required");
   }
   if (selectedPathConflict) {
-    importErrors.push("selected local path is already used");
+    configErrors.push("selected local path is already used");
   }
-
-  const runtimeErrors = [];
   if (newProject.tech_stack.trim().length <= 1) {
-    runtimeErrors.push("tech stack is required");
+    configErrors.push("tech stack is required");
   }
 
-  function canContinueFromImport() {
-    return importErrors.length === 0;
-  }
-
-  function canContinueFromRuntime() {
-    return runtimeErrors.length === 0;
-  }
-
-  function goNext() {
-    if (wizardStep === 1 && !canContinueFromImport()) {
-      setStepError(importErrors[0] || "Import step has validation errors.");
+  async function goNext() {
+    if (wizardStep === 1) {
+      if (repoStepErrors.length > 0) {
+        setStepError(repoStepErrors[0]);
+        return;
+      }
+      setStepError("");
+      await onAnalyze();
+      setWizardStep(2);
       return;
     }
-    if (wizardStep === 2 && !canContinueFromRuntime()) {
-      setStepError(runtimeErrors[0] || "Runtime step has validation errors.");
+
+    if (wizardStep === 2 && configErrors.length > 0) {
+      setStepError(configErrors[0] || "Configuration step has validation errors.");
       return;
     }
+
     setStepError("");
     setWizardStep((prev) => Math.min(prev + 1, 3));
   }
@@ -115,22 +115,31 @@ export default function ProjectsIndexPage({
               all projects
             </button>
           </div>
-          <h2>CREATE PROJECT (WIZARD)</h2>
+          <h2>CREATE PROJECT</h2>
           <div className="wizard-steps" role="tablist" aria-label="create project steps">
             <button type="button" className={`wizard-step ${wizardStep === 1 ? "active" : ""}`} onClick={() => setWizardStep(1)}>
-              1. Import
+              1. Repository
             </button>
             <button type="button" className={`wizard-step ${wizardStep === 2 ? "active" : ""}`} onClick={() => setWizardStep(2)}>
-              2. Runtime
+              2. Configure
             </button>
             <button type="button" className={`wizard-step ${wizardStep === 3 ? "active" : ""}`} onClick={() => setWizardStep(3)}>
               3. Review
             </button>
           </div>
 
-          <form className="project-form" onSubmit={handleCreateSubmit}>
+          <form className={`project-form ${wizardStep === 1 ? "project-form-compact" : ""}`} onSubmit={handleCreateSubmit}>
             {wizardStep === 1 ? (
               <>
+                <div className="wizard-inline-help">
+                  <span>Paste repository URL. On next step, we auto-detect name, path and runtime suggestions.</span>
+                </div>
+                <input
+                  placeholder="https://github.com/owner/repo"
+                  value={newProject.git_url}
+                  onChange={(event) => setNewProject((prev) => ({ ...prev, git_url: event.target.value }))}
+                  required
+                />
                 <select
                   value={newProject.service_type}
                   onChange={(event) => setNewProject((prev) => ({ ...prev, service_type: event.target.value }))}
@@ -138,16 +147,15 @@ export default function ProjectsIndexPage({
                   <option value="web">web service</option>
                   <option value="worker">worker service</option>
                 </select>
+              </>
+            ) : null}
+
+            {wizardStep === 2 ? (
+              <>
                 <input
                   placeholder="name"
                   value={newProject.name}
                   onChange={(event) => setNewProject((prev) => ({ ...prev, name: event.target.value }))}
-                  required
-                />
-                <input
-                  placeholder="git url"
-                  value={newProject.git_url}
-                  onChange={(event) => setNewProject((prev) => ({ ...prev, git_url: event.target.value }))}
                   required
                 />
                 {analyzedInfo?.suggested_project_name ? (
@@ -160,7 +168,7 @@ export default function ProjectsIndexPage({
                 ) : null}
                 <div className="project-actions" style={{ gridColumn: "1 / -1" }}>
                   <button type="button" className="ghost-btn" onClick={onAnalyze} disabled={analyzeBusy}>
-                    {analyzeBusy ? "analyzing..." : "analyze import"}
+                    {analyzeBusy ? "detecting..." : "re-run detection"}
                   </button>
                   <button type="button" className="ghost-btn" onClick={onLoadImportPaths} disabled={loadingImportPaths}>
                     {loadingImportPaths ? "loading paths..." : "scan local paths"}
@@ -207,33 +215,6 @@ export default function ProjectsIndexPage({
                     required
                   />
                 )}
-                {analyzedInfo ? (
-                  <input
-                    value={`stack=${analyzedInfo.detected_stack || "unknown"} framework=${analyzedInfo.detected_python_framework || "n/a"} next_port=${analyzedInfo.suggested_port}`}
-                    readOnly
-                  />
-                ) : null}
-                {analyzedInfo?.suggested_project_name ? (
-                  <input value={`suggested project name=${analyzedInfo.suggested_project_name}`} readOnly />
-                ) : null}
-                {selectedPathConflict ? (
-                  <div className="error-banner">Selected local path already belongs to an existing project.</div>
-                ) : null}
-                {analyzedInfo?.conflicting_paths?.length ? (
-                  <div className="error-banner">Analyzer detected conflicting paths: {analyzedInfo.conflicting_paths.join(", ")}</div>
-                ) : null}
-                {importErrors.length ? (
-                  <div className="wizard-field-errors">
-                    {importErrors.map((message) => (
-                      <p key={message}>{message}</p>
-                    ))}
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-
-            {wizardStep === 2 ? (
-              <>
                 <select
                   value={newProject.tech_stack}
                   onChange={(event) => onStackPreset(event.target.value)}
@@ -271,9 +252,21 @@ export default function ProjectsIndexPage({
                   onChange={(event) => setNewProject((prev) => ({ ...prev, domain: event.target.value }))}
                   disabled={newProject.service_type === "worker"}
                 />
-                {runtimeErrors.length ? (
+                {analyzedInfo ? (
+                  <input
+                    value={`detected stack=${analyzedInfo.detected_stack || "unknown"} framework=${analyzedInfo.detected_python_framework || "n/a"} next_port=${analyzedInfo.suggested_port}`}
+                    readOnly
+                  />
+                ) : null}
+                {selectedPathConflict ? (
+                  <div className="error-banner">Selected local path already belongs to an existing project.</div>
+                ) : null}
+                {analyzedInfo?.conflicting_paths?.length ? (
+                  <div className="error-banner">Analyzer detected conflicting paths: {analyzedInfo.conflicting_paths.join(", ")}</div>
+                ) : null}
+                {configErrors.length ? (
                   <div className="wizard-field-errors">
-                    {runtimeErrors.map((message) => (
+                    {configErrors.map((message) => (
                       <p key={message}>{message}</p>
                     ))}
                   </div>
@@ -297,15 +290,15 @@ export default function ProjectsIndexPage({
 
             <div className="wizard-nav">
               {stepError ? <div className="wizard-error">{stepError}</div> : null}
-              <button type="button" className="ghost-btn" onClick={goPrev} disabled={wizardStep === 1}>
+              <button type="button" className="ghost-btn" onClick={goPrev} disabled={wizardStep === 1 || analyzeBusy}>
                 back
               </button>
               {wizardStep < 3 ? (
-                <button type="button" className="ghost-btn" onClick={goNext}>
-                  next
+                <button type="button" className="ghost-btn" onClick={goNext} disabled={analyzeBusy}>
+                  {wizardStep === 1 && analyzeBusy ? "detecting..." : "next"}
                 </button>
               ) : (
-                <button type="submit" className="auth-btn" disabled={creatingProject || importErrors.length > 0 || runtimeErrors.length > 0}>
+                <button type="submit" className="auth-btn" disabled={creatingProject || configErrors.length > 0}>
                   {creatingProject ? "creating..." : "create project"}
                 </button>
               )}
@@ -332,7 +325,7 @@ export default function ProjectsIndexPage({
                     <StatusBadge status={project.status} />
                   </div>
                   <p>
-                    {project.tech_stack} â€¢ {project.service_type} â€¢ {project.internal_port ? `port ${project.internal_port}` : "no port"} â€¢ {project.domain || "no domain"}
+                    {project.tech_stack} • {project.service_type} • {project.internal_port ? `port ${project.internal_port}` : "no port"} • {project.domain || "no domain"}
                   </p>
                 </div>
                 <div className="project-actions">

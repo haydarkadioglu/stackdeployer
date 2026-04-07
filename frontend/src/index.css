@@ -354,6 +354,11 @@ h2 {
   align-items: start;
 }
 
+.project-form-compact {
+  grid-template-columns: minmax(0, 1fr);
+  max-width: 780px;
+}
+
 .project-form input,
 .project-form select {
   width: 100%;

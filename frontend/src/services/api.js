@@ -221,6 +221,14 @@ export async function getProjectSSLStatus(token, projectId) {
   return request(`/api/v1/projects/${projectId}/ssl/status`, { token });
 }
 
+export async function issueProjectSSL(token, projectId, payload) {
+  return request(`/api/v1/projects/${projectId}/ssl/issue`, {
+    method: "POST",
+    token,
+    body: payload,
+  });
+}
+
 export async function getDomainPlan(token, projectId, mode, domain) {
   const query = new URLSearchParams({ mode });
   if (domain) {

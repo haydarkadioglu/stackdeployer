@@ -11,6 +11,7 @@ import {
   deleteProjectDeployment,
   deployProject,
   getProjectSSLStatus,
+  issueProjectSSL,
   getSystemInfo,
   getMe,
   getDomainPlan,
@@ -515,6 +516,9 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
   const [dnsRecords, setDnsRecords] = useState([]);
   const [domainValidation, setDomainValidation] = useState(null);
   const [sslStatus, setSslStatus] = useState(null);
+  const [sslIssueEmail, setSslIssueEmail] = useState("");
+  const [sslExtraDomains, setSslExtraDomains] = useState("");
+  const [sslMessage, setSslMessage] = useState("");
   const [deploymentsFilter, setDeploymentsFilter] = useState("all");
   const [previewBranch, setPreviewBranch] = useState("feature-preview");
   const [settingsForm, setSettingsForm] = useState({
@@ -810,8 +814,30 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
     try {
       const statusPayload = await getProjectSSLStatus(token, projectId);
       setSslStatus(statusPayload);
+      setSslMessage("");
     } catch (err) {
       setGlobalError(err.message || "SSL status check failed");
+    }
+  }
+
+  async function handleIssueSSL() {
+    try {
+      const extraDomains = sslExtraDomains
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+
+      const payload = {
+        email: sslIssueEmail.trim() || null,
+        extra_domains: extraDomains,
+      };
+
+      const result = await issueProjectSSL(token, projectId, payload);
+      setSslMessage(result?.message || "SSL certificate issued successfully");
+      const statusPayload = await getProjectSSLStatus(token, projectId);
+      setSslStatus(statusPayload);
+    } catch (err) {
+      setGlobalError(err.message || "SSL issue failed");
     }
   }
 
@@ -1154,10 +1180,32 @@ function ProjectDetailPage({ token, refreshProjects, onAction, busyAction, setGl
             <button type="button" className="ghost-btn" onClick={handleValidateDomainRecords} disabled={project.service_type !== "web" || !domainValid}>
               validate dns
             </button>
+            <button type="button" className="ghost-btn" onClick={handleIssueSSL} disabled={project.service_type !== "web" || !domainValid}>
+              issue ssl certificate
+            </button>
             <button type="button" className="ghost-btn" onClick={handleCheckSSLStatus} disabled={project.service_type !== "web" || !domainValid}>
               check ssl status
             </button>
           </div>
+
+          <form className="project-form" onSubmit={(event) => event.preventDefault()}>
+            <input
+              placeholder="certbot email (optional, fallback to backend certbot_email)"
+              value={sslIssueEmail}
+              onChange={(event) => setSslIssueEmail(event.target.value)}
+            />
+            <input
+              placeholder="extra domains (comma separated, optional)"
+              value={sslExtraDomains}
+              onChange={(event) => setSslExtraDomains(event.target.value)}
+            />
+          </form>
+
+          {sslMessage ? (
+            <div className="wizard-inline-help" style={{ marginBottom: 12 }}>
+              <span>{sslMessage}</span>
+            </div>
+          ) : null}
 
           {sslStatus ? (
             <div className="wizard-inline-help" style={{ marginBottom: 12 }}>

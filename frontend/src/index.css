@@ -344,29 +344,44 @@ h2 {
 
 .project-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 20px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border);
   background: hsl(35 10% 12% / 0.82);
+  align-items: start;
 }
 
 .project-form input,
 .project-form select {
   width: 100%;
-  border-radius: 10px;
+  max-width: 480px; 
+  border-radius: 8px;
   border: 1px solid hsl(41 15% 36%);
   background: hsl(37 10% 11%);
   color: var(--text);
-  padding: 10px 12px;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 0.84rem;
+  padding: 10px 14px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
-.project-form button {
+.project-form input:focus,
+.project-form select:focus {
+  outline: none;
+  border-color: hsl(44 71% 58%);
+  box-shadow: 0 0 0 2px hsl(44 71% 58% / 0.15);
+}
+
+.project-form > button,
+.project-form > .ghost-btn {
   grid-column: 1 / -1;
+  justify-self: start;
+  max-width: max-content;
+  padding-left: 20px;
+  padding-right: 20px;
 }
 
 .project-row {
@@ -520,14 +535,27 @@ h2 {
 }
 
 .auth-btn {
-  width: 100%;
   border: 1px solid hsl(43 76% 52%);
   background: hsl(42 82% 57%);
   color: hsl(43 34% 15%);
   border-radius: 10px;
-  padding: 11px 12px;
+  padding: 11px 24px;
   font-weight: 700;
   cursor: pointer;
+  white-space: nowrap;
+}
+
+.auth-card .auth-btn {
+  width: 100%;
+}
+
+.auth-btn:hover:enabled {
+  background: hsl(42 82% 62%);
+}
+
+.auth-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .error-text {

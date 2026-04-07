@@ -1,6 +1,7 @@
 import React from "react";
 
 import StatusBadge from "../components/StatusBadge";
+import { APP_VERSION } from "../constants";
 
 export default function SystemDashboardPage({ systemInfo }) {
   if (!systemInfo) {
@@ -14,7 +15,7 @@ export default function SystemDashboardPage({ systemInfo }) {
         <article className="project-row">
           <div className="project-main">
             <h3>{systemInfo.app_name}</h3>
-            <p>{systemInfo.platform} • python {systemInfo.python_version} • host {systemInfo.host}</p>
+            <p>{systemInfo.platform} • python {systemInfo.python_version} • host {systemInfo.host} • {APP_VERSION}</p>
           </div>
         </article>
       </div>

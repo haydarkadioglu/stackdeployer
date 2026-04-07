@@ -1,5 +1,11 @@
 const LOCAL_DEV_API_BASE_URL = "http://127.0.0.1:8001";
 
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+
+function isLocalHost(hostname) {
+  return LOCAL_HOSTS.has(hostname);
+}
+
 function resolveApiBaseUrl() {
   const configured = import.meta.env.VITE_API_BASE_URL;
   if (configured) {
@@ -13,6 +19,12 @@ function resolveApiBaseUrl() {
   const origin = window.location.origin;
   if (origin.includes(":5173")) {
     return LOCAL_DEV_API_BASE_URL;
+  }
+
+  // In production, prefer HTTPS API even if the panel was opened over HTTP.
+  // This avoids transient login failures during HTTP -> HTTPS transitions.
+  if (window.location.protocol === "http:" && !isLocalHost(window.location.hostname)) {
+    return `https://${window.location.host}`;
   }
 
   return origin;

@@ -14,8 +14,6 @@ export default function NewProjectPage({
   setWizardStep,
   importPaths,
   loadingImportPaths,
-  importFilter,
-  setImportFilter,
   onLoadImportPaths,
   onStackPreset,
   onApplySuggestedName,
@@ -24,21 +22,13 @@ export default function NewProjectPage({
   const [stepError, setStepError] = useState("");
   const [browsePath, setBrowsePath] = useState("");
 
-  function getParentPath(path) {
-    const normalized = (path || "").trim().replace(/\/+$/, "");
-    if (!normalized || normalized === "/") {
-      return "";
-    }
-    const index = normalized.lastIndexOf("/");
-    if (index <= 0) {
-      return "/";
-    }
-    return normalized.slice(0, index);
-  }
-
-  const allImportPaths = Array.from(
-    new Set([...importPaths, ...(analyzedInfo?.suggested_local_paths || [])])
-  ).sort();
+  const treePaths = Array.from(new Set(importPaths)).sort();
+  const visiblePaths = browsePath.trim()
+    ? treePaths.filter((path) => {
+        const root = browsePath.trim().replace(/\/+$/, "");
+        return path === root || path.startsWith(`${root}/`);
+      })
+    : treePaths;
 
   const isPython = (newProject.tech_stack || "").toLowerCase() === "python";
   const existingProjectPaths = new Set(projects.map((project) => project.local_path));
@@ -166,14 +156,6 @@ export default function NewProjectPage({
               <button
                 type="button"
                 className="ghost-btn"
-                disabled={loadingImportPaths || !browsePath.trim()}
-                onClick={() => onLoadImportPaths(getParentPath(browsePath))}
-              >
-                up one level
-              </button>
-              <button
-                type="button"
-                className="ghost-btn"
                 disabled={loadingImportPaths}
                 onClick={() => {
                   setBrowsePath("");
@@ -202,12 +184,10 @@ export default function NewProjectPage({
                 open folder
               </button>
             </div>
-            {importPaths.length ? (
-              <input
-                placeholder="filter discovered paths"
-                value={importFilter}
-                onChange={(event) => setImportFilter(event.target.value)}
-              />
+            {browsePath.trim() ? (
+              <div className="wizard-inline-help">
+                <span>Current folder: {browsePath.trim()}</span>
+              </div>
             ) : null}
             {analyzedInfo ? (
               <div className="vercel-stack-card">
@@ -222,12 +202,11 @@ export default function NewProjectPage({
             <div className="worktree-container">
               <div className="worktree-header">
                 <span>Select Project Directory</span>
-                <span className="status">{allImportPaths.length} discovered</span>
+                <span className="status">{visiblePaths.length} discovered</span>
               </div>
               <div className="worktree-list">
-                {allImportPaths.length === 0 ? <div className="worktree-item" style={{justifyContent: 'center', color: 'gray'}}>No paths scanned. Use the scan button or enter custom path.</div> : null}
-                {allImportPaths
-                  .filter((path) => path.toLowerCase().includes(importFilter.trim().toLowerCase()))
+                {visiblePaths.length === 0 ? <div className="worktree-item" style={{justifyContent: 'center', color: 'gray'}}>No paths found in the selected folder. Open a folder or enter a local path.</div> : null}
+                {visiblePaths
                   .slice(0, 50)
                   .map((path) => (
                   <div 

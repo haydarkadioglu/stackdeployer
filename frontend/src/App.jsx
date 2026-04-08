@@ -47,7 +47,6 @@ export default function App() {
   const [wizardStep, setWizardStep] = useState(1);
   const [importPaths, setImportPaths] = useState([]);
   const [loadingImportPaths, setLoadingImportPaths] = useState(false);
-  const [importFilter, setImportFilter] = useState("");
   const [newProject, setNewProject] = useState({
     service_type: "web",
     name: "",
@@ -357,8 +356,6 @@ export default function App() {
                   setWizardStep={setWizardStep}
                   importPaths={importPaths}
                   loadingImportPaths={loadingImportPaths}
-                  importFilter={importFilter}
-                  setImportFilter={setImportFilter}
                   onLoadImportPaths={handleLoadImportPaths}
                   onStackPreset={applyStackPreset}
                   onApplySuggestedName={applySuggestedName}

@@ -56,6 +56,7 @@ executor = Executor()
 nginx_manager = NginxManager()
 ssl_service = SSLService()
 DEFAULT_IMPORT_BASE_PATHS = ["/srv/apps", "/opt/apps", "/home/ubuntu/apps"]
+DEFAULT_PROJECT_HOME_DIR = "/home/ubuntu/apps"
 FORBIDDEN_COMMAND_PATTERN = re.compile(r"[;&|`$><\r\n]")
 WINDOWS_DRIVE_PREFIX_PATTERN = re.compile(r"^[a-zA-Z]:")
 DOMAIN_PATTERN = re.compile(r"^(?!-)[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$")
@@ -422,7 +423,8 @@ def list_import_paths(
 @router.post("/import/clone", response_model=ProjectImportCloneOut)
 def clone_project_import(payload: ProjectImportCloneRequest, db: Session = Depends(get_db)) -> ProjectImportCloneOut:
     _ = db
-    validated_path = _validate_local_path(payload.local_path)
+    clone_target = payload.local_path or f"{DEFAULT_PROJECT_HOME_DIR}/{_safe_slug_from_git_url(payload.git_url)}"
+    validated_path = _validate_local_path(clone_target)
     target_path = Path(validated_path)
     had_git_repo = (target_path / ".git").exists()
 

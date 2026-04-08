@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { PROJECT_HOME_DIR } from "../constants";
+
 export default function NewProjectPage({
   projects,
   newProject,
@@ -22,17 +24,16 @@ export default function NewProjectPage({
 }) {
   const navigate = useNavigate();
   const [stepError, setStepError] = useState("");
-  const initialBrowsePath = newProject.local_path || "";
-  const [browsePath, setBrowsePath] = useState(initialBrowsePath);
+  const [browsePath, setBrowsePath] = useState(newProject.local_path || "");
 
   function suggestClonePathFromGitUrl(gitUrl) {
     const trimmed = (gitUrl || "").trim().replace(/\/+$/, "");
     if (!trimmed) {
-      return "";
+      return PROJECT_HOME_DIR;
     }
     const leaf = trimmed.split("/").pop() || "project";
     const repoName = leaf.replace(/\.git$/i, "").replace(/[^a-zA-Z0-9._-]/g, "-") || "project";
-    return `/srv/apps/${repoName}`;
+    return `${PROJECT_HOME_DIR}/${repoName}`;
   }
 
   const treePaths = Array.from(new Set(importPaths)).sort();
@@ -84,6 +85,7 @@ export default function NewProjectPage({
         ...prev,
         local_path: cloneTargetPath,
       }));
+      setBrowsePath(cloneTargetPath);
 
       const cloned = await onCloneImport(cloneTargetPath);
       if (!cloned) {
@@ -152,20 +154,14 @@ export default function NewProjectPage({
                 const gitUrl = event.target.value;
                 setNewProject((prev) => ({ ...prev, git_url: gitUrl }));
                 if (!browsePath.trim()) {
-                  const suggested = suggestClonePathFromGitUrl(gitUrl);
-                  if (suggested) {
-                    setBrowsePath(suggested);
-                  }
+                  setBrowsePath(suggestClonePathFromGitUrl(gitUrl));
                 }
               }}
               required
             />
-            <input
-              placeholder="clone local path (e.g. /srv/apps/my-project)"
-              value={browsePath}
-              onChange={(event) => setBrowsePath(event.target.value)}
-              required
-            />
+            <div className="wizard-inline-help">
+              <span>Clone destination: {cloneTargetPath || `${PROJECT_HOME_DIR}/<repo-name>`}</span>
+            </div>
             {cloningImport ? (
               <div className="clone-progress" role="status" aria-live="polite">
                 <div className="clone-progress-bar" />
@@ -202,36 +198,17 @@ export default function NewProjectPage({
               <button type="button" className="ghost-btn" onClick={onAnalyze} disabled={analyzeBusy}>
                 {analyzeBusy ? "detecting..." : "re-run detection"}
               </button>
-              <button type="button" className="ghost-btn" onClick={() => onLoadImportPaths(browsePath)} disabled={loadingImportPaths}>
-                {loadingImportPaths ? "loading paths..." : "scan local paths"}
-              </button>
               <button
                 type="button"
                 className="ghost-btn"
                 disabled={loadingImportPaths || !browsePath.trim()}
                 onClick={() => onLoadImportPaths(browsePath)}
               >
-                refresh folder
+                {loadingImportPaths ? "loading paths..." : "refresh cloned folder"}
               </button>
             </div>
             <div className="wizard-inline-help">
               <span>Cloned project folders are listed below. Use open to dive deeper.</span>
-            </div>
-            <div className="project-actions" style={{ gridColumn: "1 / -1", gap: 8 }}>
-              <input
-                style={{ flex: 1 }}
-                placeholder="/srv/apps/your-cloned-project"
-                value={browsePath}
-                onChange={(event) => setBrowsePath(event.target.value)}
-              />
-              <button
-                type="button"
-                className="ghost-btn"
-                disabled={loadingImportPaths || cloningImport || browsePath.trim().length < 2}
-                onClick={() => onLoadImportPaths(browsePath)}
-              >
-                open folder
-              </button>
             </div>
             {browsePath.trim() ? (
               <div className="wizard-inline-help">

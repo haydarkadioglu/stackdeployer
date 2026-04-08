@@ -228,7 +228,7 @@ export default function App() {
 
       const result = await cloneImportRepository(token, {
         git_url: newProject.git_url.trim(),
-        local_path: normalizedPath,
+        local_path: normalizedPath || null,
         branch: "main",
       });
 

@@ -468,12 +468,15 @@ h2 {
   font-family: "JetBrains Mono", monospace;
   font-size: 0.95rem;
   cursor: pointer;
-  transition: border-color 160ms ease, color 160ms ease;
+  transition: all 160ms ease;
+  white-space: nowrap;
 }
 
 .ghost-btn:hover:enabled {
   border-color: hsl(44 71% 58%);
   color: hsl(43 88% 72%);
+  background: hsl(44 71% 58% / 0.08);
+  transform: translateY(-1px);
 }
 
 .ghost-btn:disabled {
@@ -552,6 +555,9 @@ h2 {
 
 .auth-card .auth-btn {
   width: 100%;
+  max-width: 180px;
+  margin: 10px auto 0;
+  display: block;
 }
 
 .auth-help-toggle {
@@ -612,12 +618,40 @@ h2 {
 
 .auth-btn:hover:enabled {
   background: hsl(42 82% 62%);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px hsl(42 82% 57% / 0.3);
 }
 
 .auth-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
+.lazy-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 400px;
+  gap: 12px;
+  color: var(--muted);
+}
+
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid hsl(41 16% 41%);
+  border-top-color: hsl(44 71% 58%);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 
 .error-text {
   margin: 0 0 12px;

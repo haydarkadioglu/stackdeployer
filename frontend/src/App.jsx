@@ -17,12 +17,19 @@ import {
 } from "./services/api";
 import AuthScreen from "./components/AuthScreen";
 import { TOKEN_KEY } from "./constants";
-import AccountPage from "./pages/AccountPage";
-import GeneralSettingsPage from "./pages/GeneralSettingsPage";
-import NewProjectPage from "./pages/NewProjectPage";
-import ProjectDetailPage from "./pages/ProjectDetailPage";
-import ProjectsIndexPage from "./pages/ProjectsIndexPage";
-import SystemDashboardPage from "./pages/SystemDashboardPage";
+
+const AccountPage = React.lazy(() => import("./pages/AccountPage"));
+const GeneralSettingsPage = React.lazy(() => import("./pages/GeneralSettingsPage"));
+const NewProjectPage = React.lazy(() => import("./pages/NewProjectPage"));
+const ProjectDetailPage = React.lazy(() => import("./pages/ProjectDetailPage"));
+const ProjectsIndexPage = React.lazy(() => import("./pages/ProjectsIndexPage"));
+const SystemDashboardPage = React.lazy(() => import("./pages/SystemDashboardPage"));
+
+const SuspenseFallback = () => (
+  <div className="lazy-loader">
+    <div className="spinner"></div>
+  </div>
+);
 
 export default function App() {
   const location = useLocation();
@@ -321,7 +328,8 @@ export default function App() {
 
         <main className="content">
           {error ? <div className="error-banner">{error}</div> : null}
-          <Routes>
+          <React.Suspense fallback={<SuspenseFallback />}>
+            <Routes>
             <Route
               path="/projects"
               element={
@@ -387,6 +395,7 @@ export default function App() {
             />
             <Route path="*" element={<Navigate to="/projects" replace />} />
           </Routes>
+        </React.Suspense>
         </main>
       </div>
     </div>

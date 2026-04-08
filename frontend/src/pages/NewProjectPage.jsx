@@ -23,6 +23,10 @@ export default function NewProjectPage({
   const navigate = useNavigate();
   const [stepError, setStepError] = useState("");
 
+  const allImportPaths = Array.from(
+    new Set([...importPaths, ...(analyzedInfo?.suggested_local_paths || [])])
+  ).sort();
+
   const isPython = (newProject.tech_stack || "").toLowerCase() === "python";
   const existingProjectPaths = new Set(projects.map((project) => project.local_path));
   const analyzedConflicts = new Set(analyzedInfo?.conflicting_paths || []);
@@ -154,40 +158,52 @@ export default function NewProjectPage({
                 onChange={(event) => setImportFilter(event.target.value)}
               />
             ) : null}
-            {importPaths.length ? (
-              <select
-                value={newProject.local_path}
-                onChange={(event) => setNewProject((prev) => ({ ...prev, local_path: event.target.value }))}
-              >
-                {importPaths
-                  .filter((path) => path.toLowerCase().includes(importFilter.trim().toLowerCase()))
-                  .slice(0, 120)
-                  .map((path) => (
-                    <option key={path} value={path} disabled={existingProjectPaths.has(path) || analyzedConflicts.has(path)}>
-                      {path}{existingProjectPaths.has(path) || analyzedConflicts.has(path) ? " (in use)" : ""}
-                    </option>
-                  ))}
-              </select>
+            {analyzedInfo ? (
+              <div className="vercel-stack-card">
+                 <div className="stack-icon">⚡</div>
+                 <div className="stack-info">
+                    <strong>Auto-Detected Stack: {analyzedInfo.detected_stack || 'Unknown'}</strong>
+                    <span>Framework: {analyzedInfo.detected_python_framework || 'Standard'} | Suggested Port: {analyzedInfo.suggested_port || 'n/a'}</span>
+                 </div>
+              </div>
             ) : null}
-            {analyzedInfo?.suggested_local_paths?.length ? (
-              <select
-                value={newProject.local_path}
-                onChange={(event) => setNewProject((prev) => ({ ...prev, local_path: event.target.value }))}
-              >
-                {analyzedInfo.suggested_local_paths.map((path) => (
-                  <option key={path} value={path} disabled={existingProjectPaths.has(path) || analyzedConflicts.has(path)}>
-                    {path}{existingProjectPaths.has(path) || analyzedConflicts.has(path) ? " (in use)" : ""}
-                  </option>
+
+            <div className="worktree-container">
+              <div className="worktree-header">
+                <span>Select Project Directory</span>
+                <span className="status">{allImportPaths.length} discovered</span>
+              </div>
+              <div className="worktree-list">
+                {allImportPaths.length === 0 ? <div className="worktree-item" style={{justifyContent: 'center', color: 'gray'}}>No paths scanned. Use the scan button or enter custom path.</div> : null}
+                {allImportPaths
+                  .filter((path) => path.toLowerCase().includes(importFilter.trim().toLowerCase()))
+                  .slice(0, 50)
+                  .map((path) => (
+                  <div 
+                    key={path} 
+                    className={`worktree-item ${newProject.local_path === path ? 'selected' : ''} ${existingProjectPaths.has(path) || analyzedConflicts.has(path) ? 'disabled' : ''}`}
+                    onClick={() => {
+                        if (!(existingProjectPaths.has(path) || analyzedConflicts.has(path))) {
+                           setNewProject((prev) => ({ ...prev, local_path: path }));
+                        }
+                    }}
+                  >
+                    <span className="folder-icon">📁</span>
+                    <span className="folder-name">{path}</span>
+                    {analyzedInfo?.suggested_local_paths?.includes(path) ? <span className="badge-suggested">Suggested</span> : null}
+                    {existingProjectPaths.has(path) || analyzedConflicts.has(path) ? <span className="status status-error" style={{marginLeft: 'auto'}}>In Use</span> : null}
+                  </div>
                 ))}
-              </select>
-            ) : (
-              <input
-                placeholder="local path (example: /srv/apps/myapp)"
-                value={newProject.local_path}
-                onChange={(event) => setNewProject((prev) => ({ ...prev, local_path: event.target.value }))}
-                required
-              />
-            )}
+              </div>
+              <div className="worktree-custom">
+                <input
+                  placeholder="Or enter custom local path (e.g. /srv/apps/myapp)"
+                  value={newProject.local_path}
+                  onChange={(event) => setNewProject((prev) => ({ ...prev, local_path: event.target.value }))}
+                  required
+                />
+              </div>
+            </div>
             <select
               value={newProject.tech_stack}
               onChange={(event) => onStackPreset(event.target.value)}
@@ -225,12 +241,6 @@ export default function NewProjectPage({
               onChange={(event) => setNewProject((prev) => ({ ...prev, domain: event.target.value }))}
               disabled={newProject.service_type === "worker"}
             />
-            {analyzedInfo ? (
-              <input
-                value={`detected stack=${analyzedInfo.detected_stack || "unknown"} framework=${analyzedInfo.detected_python_framework || "n/a"} next_port=${analyzedInfo.suggested_port}`}
-                readOnly
-              />
-            ) : null}
             {selectedPathConflict ? (
               <div className="error-banner">Selected local path already belongs to an existing project.</div>
             ) : null}

@@ -181,8 +181,15 @@ export async function analyzeProjectImport(token, payload) {
   });
 }
 
-export async function listImportPaths(token) {
-  return request("/api/v1/projects/import/paths", { token });
+export async function listImportPaths(token, basePath = "", depth = 1) {
+  const query = new URLSearchParams();
+  if (basePath && basePath.trim()) {
+    query.set("base_path", basePath.trim());
+  }
+  query.set("depth", String(depth));
+
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  return request(`/api/v1/projects/import/paths${suffix}`, { token });
 }
 
 export async function deployProject(token, projectId, payload) {

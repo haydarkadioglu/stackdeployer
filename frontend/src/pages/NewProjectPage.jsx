@@ -22,6 +22,19 @@ export default function NewProjectPage({
 }) {
   const navigate = useNavigate();
   const [stepError, setStepError] = useState("");
+  const [browsePath, setBrowsePath] = useState("");
+
+  function getParentPath(path) {
+    const normalized = (path || "").trim().replace(/\/+$/, "");
+    if (!normalized || normalized === "/") {
+      return "";
+    }
+    const index = normalized.lastIndexOf("/");
+    if (index <= 0) {
+      return "/";
+    }
+    return normalized.slice(0, index);
+  }
 
   const allImportPaths = Array.from(
     new Set([...importPaths, ...(analyzedInfo?.suggested_local_paths || [])])
@@ -147,8 +160,46 @@ export default function NewProjectPage({
               <button type="button" className="ghost-btn" onClick={onAnalyze} disabled={analyzeBusy}>
                 {analyzeBusy ? "detecting..." : "re-run detection"}
               </button>
-              <button type="button" className="ghost-btn" onClick={onLoadImportPaths} disabled={loadingImportPaths}>
+              <button type="button" className="ghost-btn" onClick={() => onLoadImportPaths(browsePath)} disabled={loadingImportPaths}>
                 {loadingImportPaths ? "loading paths..." : "scan local paths"}
+              </button>
+              <button
+                type="button"
+                className="ghost-btn"
+                disabled={loadingImportPaths || !browsePath.trim()}
+                onClick={() => onLoadImportPaths(getParentPath(browsePath))}
+              >
+                up one level
+              </button>
+              <button
+                type="button"
+                className="ghost-btn"
+                disabled={loadingImportPaths}
+                onClick={() => {
+                  setBrowsePath("");
+                  onLoadImportPaths("");
+                }}
+              >
+                reset roots
+              </button>
+            </div>
+            <div className="wizard-inline-help">
+              <span>Browse path (open a folder to see its subfolders).</span>
+            </div>
+            <div className="project-actions" style={{ gridColumn: "1 / -1", gap: 8 }}>
+              <input
+                style={{ flex: 1 }}
+                placeholder="/srv/apps/your-cloned-project"
+                value={browsePath}
+                onChange={(event) => setBrowsePath(event.target.value)}
+              />
+              <button
+                type="button"
+                className="ghost-btn"
+                disabled={loadingImportPaths || browsePath.trim().length < 2}
+                onClick={() => onLoadImportPaths(browsePath)}
+              >
+                open folder
               </button>
             </div>
             {importPaths.length ? (
@@ -190,6 +241,19 @@ export default function NewProjectPage({
                   >
                     <span className="folder-icon">📁</span>
                     <span className="folder-name">{path}</span>
+                    <button
+                      type="button"
+                      className="ghost-btn"
+                      style={{ marginLeft: "auto" }}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setBrowsePath(path);
+                        onLoadImportPaths(path);
+                      }}
+                      disabled={loadingImportPaths}
+                    >
+                      open
+                    </button>
                     {analyzedInfo?.suggested_local_paths?.includes(path) ? <span className="badge-suggested">Suggested</span> : null}
                     {existingProjectPaths.has(path) || analyzedConflicts.has(path) ? <span className="status status-error" style={{marginLeft: 'auto'}}>In Use</span> : null}
                   </div>

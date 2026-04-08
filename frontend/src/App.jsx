@@ -195,11 +195,11 @@ export default function App() {
     }
   }
 
-  async function handleLoadImportPaths() {
+  async function handleLoadImportPaths(basePath = "") {
     try {
       setError("");
       setLoadingImportPaths(true);
-      const result = await listImportPaths(token);
+      const result = await listImportPaths(token, basePath, 1);
       setImportPaths(result?.discovered_paths || []);
       if (!newProject.local_path && result?.discovered_paths?.length) {
         setNewProject((prev) => ({ ...prev, local_path: result.discovered_paths[0] }));

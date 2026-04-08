@@ -9,7 +9,7 @@ import re
 import socket
 import subprocess
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from cryptography.fernet import Fernet, InvalidToken
@@ -110,6 +110,14 @@ def _validate_local_path(local_path: str) -> str:
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=f"local_path must be inside allowed roots: {', '.join(allowed_roots)}",
     )
+
+
+def _is_path_within_allowed_roots(path: str) -> bool:
+    resolved = _resolve_posix_path(path)
+    for root in get_allowed_project_roots():
+        if resolved == root or resolved.startswith(f"{root}/"):
+            return True
+    return False
 
 
 def _validate_command(command: str | None, field_name: str) -> None:
@@ -310,17 +318,40 @@ def _preview_app_name(project: Project, branch: str) -> str:
     return f"{project.name}-preview-{_safe_slug(branch)}"
 
 
-def _discover_paths(base_paths: list[str]) -> list[str]:
+def _discover_paths(base_paths: list[str], max_depth: int = 1, max_entries: int = 500) -> list[str]:
     discovered: list[str] = []
+    seen: set[str] = set()
+
+    bounded_depth = max(0, min(max_depth, 4))
     for base in base_paths:
         base_path = Path(base)
         if not base_path.exists() or not base_path.is_dir():
             continue
 
-        discovered.append(str(base_path))
-        for child in sorted(base_path.iterdir(), key=lambda p: p.name.lower()):
-            if child.is_dir() and not child.name.startswith("."):
-                discovered.append(str(child))
+        queue: list[tuple[Path, int]] = [(base_path, 0)]
+        while queue and len(discovered) < max_entries:
+            current, depth = queue.pop(0)
+            current_str = str(current)
+            if current_str in seen:
+                continue
+
+            seen.add(current_str)
+            discovered.append(current_str)
+
+            if depth >= bounded_depth:
+                continue
+
+            try:
+                children = sorted(current.iterdir(), key=lambda p: p.name.lower())
+            except OSError:
+                continue
+
+            for child in children:
+                if child.is_dir() and not child.name.startswith("."):
+                    queue.append((child, depth + 1))
+
+            if len(discovered) >= max_entries:
+                break
     return discovered
 
 
@@ -363,9 +394,26 @@ def get_next_port(start_port: int = 8000, db: Session = Depends(get_db)) -> Next
 
 
 @router.get("/import/paths", response_model=ImportPathsOut)
-def list_import_paths(db: Session = Depends(get_db)) -> ImportPathsOut:
+def list_import_paths(
+    base_path: str | None = Query(default=None, max_length=1000),
+    depth: int = Query(default=1, ge=0, le=4),
+    db: Session = Depends(get_db),
+) -> ImportPathsOut:
     _ = db
-    discovered = _discover_paths(DEFAULT_IMPORT_BASE_PATHS)
+    if base_path and base_path.strip():
+        normalized = posixpath.normpath(base_path.strip())
+        if not normalized.startswith("/"):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="base_path must be absolute")
+        if not _is_path_within_allowed_roots(normalized):
+            allowed = ", ".join(get_allowed_project_roots())
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"base_path must be inside allowed roots: {allowed}",
+            )
+        discovered = _discover_paths([normalized], max_depth=depth)
+    else:
+        discovered = _discover_paths(DEFAULT_IMPORT_BASE_PATHS, max_depth=1)
+
     return ImportPathsOut(base_paths=DEFAULT_IMPORT_BASE_PATHS, discovered_paths=discovered)
 
 

@@ -55,23 +55,22 @@ export default function GeneralSettingsPage({ token, setGlobalError }) {
 
       try {
         setUpdateCheck({ status: "checking", latest: "", source: "" });
-
-        const releaseResponse = await fetch(`https://api.github.com/repos/${repoPath}/releases/latest`);
         let latest = "";
         let source = "";
 
-        if (releaseResponse.ok) {
-          const releasePayload = await releaseResponse.json();
-          latest = releasePayload?.tag_name || "";
-          source = "release";
+        const tagsResponse = await fetch(`https://api.github.com/repos/${repoPath}/tags?per_page=1`);
+        if (tagsResponse.ok) {
+          const tagsPayload = await tagsResponse.json();
+          latest = tagsPayload?.[0]?.name || "";
+          source = "tag";
         }
 
         if (!latest) {
-          const tagsResponse = await fetch(`https://api.github.com/repos/${repoPath}/tags?per_page=1`);
-          if (tagsResponse.ok) {
-            const tagsPayload = await tagsResponse.json();
-            latest = tagsPayload?.[0]?.name || "";
-            source = "tag";
+          const releaseResponse = await fetch(`https://api.github.com/repos/${repoPath}/releases/latest`);
+          if (releaseResponse.ok) {
+            const releasePayload = await releaseResponse.json();
+            latest = releasePayload?.tag_name || "";
+            source = "release";
           }
         }
 

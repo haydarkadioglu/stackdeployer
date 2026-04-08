@@ -22,13 +22,13 @@ export default function NewProjectPage({
 }) {
   const navigate = useNavigate();
   const [stepError, setStepError] = useState("");
-  const initialBrowsePath = newProject.local_path || "/srv/apps";
+  const initialBrowsePath = newProject.local_path || "";
   const [browsePath, setBrowsePath] = useState(initialBrowsePath);
 
   function suggestClonePathFromGitUrl(gitUrl) {
     const trimmed = (gitUrl || "").trim().replace(/\/+$/, "");
     if (!trimmed) {
-      return "/srv/apps";
+      return "";
     }
     const leaf = trimmed.split("/").pop() || "project";
     const repoName = leaf.replace(/\.git$/i, "").replace(/[^a-zA-Z0-9._-]/g, "-") || "project";
@@ -151,8 +151,11 @@ export default function NewProjectPage({
               onChange={(event) => {
                 const gitUrl = event.target.value;
                 setNewProject((prev) => ({ ...prev, git_url: gitUrl }));
-                if (!browsePath.trim() || browsePath.trim() === "/srv/apps") {
-                  setBrowsePath(suggestClonePathFromGitUrl(gitUrl));
+                if (!browsePath.trim()) {
+                  const suggested = suggestClonePathFromGitUrl(gitUrl);
+                  if (suggested) {
+                    setBrowsePath(suggested);
+                  }
                 }
               }}
               required
@@ -205,13 +208,10 @@ export default function NewProjectPage({
               <button
                 type="button"
                 className="ghost-btn"
-                disabled={loadingImportPaths}
-                onClick={() => {
-                  setBrowsePath("");
-                  onLoadImportPaths("");
-                }}
+                disabled={loadingImportPaths || !browsePath.trim()}
+                onClick={() => onLoadImportPaths(browsePath)}
               >
-                reset roots
+                refresh folder
               </button>
             </div>
             <div className="wizard-inline-help">

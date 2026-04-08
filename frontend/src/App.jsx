@@ -201,6 +201,10 @@ export default function App() {
     try {
       setError("");
       setLoadingImportPaths(true);
+      if (!basePath.trim()) {
+        setImportPaths([]);
+        return;
+      }
       const result = await listImportPaths(token, basePath, 1);
       setImportPaths(result?.discovered_paths || []);
       if (!newProject.local_path && result?.discovered_paths?.length) {
@@ -235,7 +239,12 @@ export default function App() {
       }));
       return true;
     } catch (err) {
-      setError(err.message || "Repository clone failed");
+      const rawMessage = err?.message || "Repository clone failed";
+      if (rawMessage.includes("(404)")) {
+        setError("Backend update required: /api/v1/projects/import/clone endpoint not found on server.");
+      } else {
+        setError(rawMessage);
+      }
       return false;
     } finally {
       setCloningImport(false);

@@ -3,6 +3,7 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-route
 
 import {
   analyzeProjectImport,
+  cloneImportRepository,
   createProject,
   deleteProject,
   deployProject,
@@ -47,6 +48,7 @@ export default function App() {
   const [wizardStep, setWizardStep] = useState(1);
   const [importPaths, setImportPaths] = useState([]);
   const [loadingImportPaths, setLoadingImportPaths] = useState(false);
+  const [cloningImport, setCloningImport] = useState(false);
   const [newProject, setNewProject] = useState({
     service_type: "web",
     name: "",
@@ -210,6 +212,35 @@ export default function App() {
     }
   }
 
+  async function handleCloneImport(targetPath) {
+    try {
+      setError("");
+      setCloningImport(true);
+      const normalizedPath = (targetPath || "").trim();
+      if (normalizedPath.length < 2) {
+        throw new Error("local path is required for clone");
+      }
+
+      const result = await cloneImportRepository(token, {
+        git_url: newProject.git_url.trim(),
+        local_path: normalizedPath,
+        branch: "main",
+      });
+
+      setImportPaths(result?.discovered_paths || []);
+      setNewProject((prev) => ({
+        ...prev,
+        local_path: normalizedPath,
+      }));
+      return true;
+    } catch (err) {
+      setError(err.message || "Repository clone failed");
+      return false;
+    } finally {
+      setCloningImport(false);
+    }
+  }
+
   function applyStackPreset(stackValue) {
     const normalized = (stackValue || "").toLowerCase();
     const suggestedPort = Number(newProject.internal_port || analyzedInfo?.suggested_port || 8000);
@@ -356,7 +387,9 @@ export default function App() {
                   setWizardStep={setWizardStep}
                   importPaths={importPaths}
                   loadingImportPaths={loadingImportPaths}
+                  cloningImport={cloningImport}
                   onLoadImportPaths={handleLoadImportPaths}
+                  onCloneImport={handleCloneImport}
                   onStackPreset={applyStackPreset}
                   onApplySuggestedName={applySuggestedName}
                 />

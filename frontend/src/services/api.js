@@ -192,6 +192,14 @@ export async function listImportPaths(token, basePath = "", depth = 1) {
   return request(`/api/v1/projects/import/paths${suffix}`, { token });
 }
 
+export async function cloneImportRepository(token, payload) {
+  return request("/api/v1/projects/import/clone", {
+    method: "POST",
+    token,
+    body: payload,
+  });
+}
+
 export async function deployProject(token, projectId, payload) {
   return request(`/api/v1/projects/${projectId}/deploy`, {
     method: "POST",

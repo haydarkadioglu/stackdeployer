@@ -33,6 +33,8 @@ from ..schemas import (
     LogOut,
     NginxApplyRequest,
     NextPortOut,
+    ProjectImportCloneOut,
+    ProjectImportCloneRequest,
     ProjectImportAnalyzeOut,
     ProjectImportAnalyzeRequest,
     ProjectSSLStatusOut,
@@ -415,6 +417,35 @@ def list_import_paths(
         discovered = _discover_paths(DEFAULT_IMPORT_BASE_PATHS, max_depth=1)
 
     return ImportPathsOut(base_paths=DEFAULT_IMPORT_BASE_PATHS, discovered_paths=discovered)
+
+
+@router.post("/import/clone", response_model=ProjectImportCloneOut)
+def clone_project_import(payload: ProjectImportCloneRequest, db: Session = Depends(get_db)) -> ProjectImportCloneOut:
+    _ = db
+    validated_path = _validate_local_path(payload.local_path)
+    target_path = Path(validated_path)
+    had_git_repo = (target_path / ".git").exists()
+
+    if target_path.exists() and target_path.is_dir() and not (target_path / ".git").exists():
+        has_any_file = any(target_path.iterdir())
+        if has_any_file:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="local_path exists and is not a git repository; choose an empty directory",
+            )
+
+    try:
+        executor.clone_or_update(payload.git_url.strip(), target_path, branch=payload.branch.strip() or "main")
+    except ExecutorError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    discovered = _discover_paths([str(target_path)], max_depth=1)
+    return ProjectImportCloneOut(
+        message="Repository updated successfully" if had_git_repo else "Repository cloned successfully",
+        local_path=str(target_path),
+        branch=payload.branch.strip() or "main",
+        discovered_paths=discovered,
+    )
 
 
 @router.post("/import/analyze", response_model=ProjectImportAnalyzeOut)

@@ -14,7 +14,9 @@ export default function NewProjectPage({
   setWizardStep,
   importPaths,
   loadingImportPaths,
+  cloningImport,
   onLoadImportPaths,
+  onCloneImport,
   onStackPreset,
   onApplySuggestedName,
 }) {
@@ -84,6 +86,19 @@ export default function NewProjectPage({
     const created = await onCreate(event);
     if (created) {
       navigate("/projects");
+    }
+  }
+
+  async function handleCloneIntoPath() {
+    const target = browsePath.trim() || newProject.local_path.trim();
+    if (!target) {
+      setStepError("enter local path first, then clone");
+      return;
+    }
+    setStepError("");
+    const ok = await onCloneImport(target);
+    if (ok) {
+      setBrowsePath(target);
     }
   }
 
@@ -166,7 +181,7 @@ export default function NewProjectPage({
               </button>
             </div>
             <div className="wizard-inline-help">
-              <span>Browse path (open a folder to see its subfolders).</span>
+              <span>Clone first, then browse the cloned folder contents.</span>
             </div>
             <div className="project-actions" style={{ gridColumn: "1 / -1", gap: 8 }}>
               <input
@@ -177,13 +192,27 @@ export default function NewProjectPage({
               />
               <button
                 type="button"
+                className="auth-btn"
+                disabled={cloningImport || analyzeBusy || newProject.git_url.trim().length < 4 || browsePath.trim().length < 2}
+                onClick={handleCloneIntoPath}
+              >
+                {cloningImport ? "cloning..." : "clone repository"}
+              </button>
+              <button
+                type="button"
                 className="ghost-btn"
-                disabled={loadingImportPaths || browsePath.trim().length < 2}
+                disabled={loadingImportPaths || cloningImport || browsePath.trim().length < 2}
                 onClick={() => onLoadImportPaths(browsePath)}
               >
                 open folder
               </button>
             </div>
+            {cloningImport ? (
+              <div className="clone-progress" role="status" aria-live="polite">
+                <div className="clone-progress-bar" />
+                <span>Cloning repository, please wait...</span>
+              </div>
+            ) : null}
             {browsePath.trim() ? (
               <div className="wizard-inline-help">
                 <span>Current folder: {browsePath.trim()}</span>

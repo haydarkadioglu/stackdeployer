@@ -115,6 +115,19 @@ class ImportPathsOut(BaseModel):
     discovered_paths: list[str]
 
 
+class ProjectImportCloneRequest(BaseModel):
+    git_url: str = Field(min_length=3, max_length=1000)
+    local_path: str = Field(min_length=2, max_length=1000)
+    branch: str = Field(default="main", min_length=1, max_length=120)
+
+
+class ProjectImportCloneOut(BaseModel):
+    message: str
+    local_path: str
+    branch: str
+    discovered_paths: list[str]
+
+
 class ProjectImportAnalyzeRequest(BaseModel):
     git_url: str | None = Field(default=None, max_length=1000)
     local_path: str | None = Field(default=None, max_length=1000)

@@ -75,19 +75,27 @@ class Executor:
             stderr=stderr,
         )
 
-    def clone_or_update(self, repo_url: str, target_dir: str | Path, branch: str = "main") -> CommandResult:
+    def clone_or_update(self, repo_url: str, target_dir: str | Path, branch: str | None = None) -> CommandResult:
         target_path = Path(target_dir)
         if (target_path / ".git").exists():
             result = self.run(["git", "fetch", "origin"], cwd=target_path)
             self._ensure_success(result, "git fetch failed")
-            result = self.run(["git", "checkout", branch], cwd=target_path)
-            self._ensure_success(result, f"git checkout {branch} failed")
-            result = self.run(["git", "pull", "origin", branch], cwd=target_path)
-            self._ensure_success(result, f"git pull origin {branch} failed")
+            current_branch = branch
+            if not current_branch:
+                current_result = self.run(["git", "branch", "--show-current"], cwd=target_path)
+                current_branch = (current_result.stdout or "").strip() or "main"
+            result = self.run(["git", "checkout", current_branch], cwd=target_path)
+            self._ensure_success(result, f"git checkout {current_branch} failed")
+            result = self.run(["git", "pull", "origin", current_branch], cwd=target_path)
+            self._ensure_success(result, f"git pull origin {current_branch} failed")
             return result
 
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        result = self.run(["git", "clone", "-b", branch, repo_url, str(target_path)])
+        command = ["git", "clone"]
+        if branch:
+            command.extend(["-b", branch])
+        command.extend([repo_url, str(target_path)])
+        result = self.run(command)
         self._ensure_success(result, "git clone failed")
         return result
 

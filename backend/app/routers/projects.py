@@ -437,7 +437,7 @@ def clone_project_import(payload: ProjectImportCloneRequest, db: Session = Depen
             )
 
     try:
-        executor.clone_or_update(payload.git_url.strip(), target_path, branch=payload.branch.strip() or "main")
+        executor.clone_or_update(payload.git_url.strip(), target_path, branch=payload.branch.strip() if payload.branch else None)
     except ExecutorError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -445,7 +445,7 @@ def clone_project_import(payload: ProjectImportCloneRequest, db: Session = Depen
     return ProjectImportCloneOut(
         message="Repository updated successfully" if had_git_repo else "Repository cloned successfully",
         local_path=str(target_path),
-        branch=payload.branch.strip() or "main",
+        branch=(payload.branch.strip() if payload.branch else "") or "default",
         discovered_paths=discovered,
     )
 

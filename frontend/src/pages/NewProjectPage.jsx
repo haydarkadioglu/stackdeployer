@@ -22,7 +22,18 @@ export default function NewProjectPage({
 }) {
   const navigate = useNavigate();
   const [stepError, setStepError] = useState("");
-  const [browsePath, setBrowsePath] = useState("");
+  const initialBrowsePath = newProject.local_path || "/srv/apps";
+  const [browsePath, setBrowsePath] = useState(initialBrowsePath);
+
+  function suggestClonePathFromGitUrl(gitUrl) {
+    const trimmed = (gitUrl || "").trim().replace(/\/+$/, "");
+    if (!trimmed) {
+      return "/srv/apps";
+    }
+    const leaf = trimmed.split("/").pop() || "project";
+    const repoName = leaf.replace(/\.git$/i, "").replace(/[^a-zA-Z0-9._-]/g, "-") || "project";
+    return `/srv/apps/${repoName}`;
+  }
 
   const treePaths = Array.from(new Set(importPaths)).sort();
   const visiblePaths = browsePath.trim()
@@ -40,6 +51,10 @@ export default function NewProjectPage({
   const repoStepErrors = [];
   if (newProject.git_url.trim().length <= 3) {
     repoStepErrors.push("git url is required");
+  }
+  const cloneTargetPath = browsePath.trim() || newProject.local_path.trim() || suggestClonePathFromGitUrl(newProject.git_url);
+  if (cloneTargetPath.length <= 1) {
+    repoStepErrors.push("clone local path is required");
   }
 
   const configErrors = [];
@@ -62,8 +77,22 @@ export default function NewProjectPage({
         setStepError(repoStepErrors[0]);
         return;
       }
+
       setStepError("");
-      await onAnalyze();
+
+      setNewProject((prev) => ({
+        ...prev,
+        local_path: cloneTargetPath,
+      }));
+
+      const cloned = await onCloneImport(cloneTargetPath);
+      if (!cloned) {
+        setStepError("clone failed, check repository URL and local path");
+        return;
+      }
+
+      await onLoadImportPaths(cloneTargetPath);
+      await onAnalyze(cloneTargetPath);
       setWizardStep(2);
       return;
     }
@@ -86,19 +115,6 @@ export default function NewProjectPage({
     const created = await onCreate(event);
     if (created) {
       navigate("/projects");
-    }
-  }
-
-  async function handleCloneIntoPath() {
-    const target = browsePath.trim() || newProject.local_path.trim();
-    if (!target) {
-      setStepError("enter local path first, then clone");
-      return;
-    }
-    setStepError("");
-    const ok = await onCloneImport(target);
-    if (ok) {
-      setBrowsePath(target);
     }
   }
 
@@ -127,14 +143,32 @@ export default function NewProjectPage({
         {wizardStep === 1 ? (
           <>
             <div className="wizard-inline-help">
-              <span>Paste repository URL. On next step, we auto-detect name, path and runtime suggestions.</span>
+              <span>Step 1 does clone. After clone, Step 2 opens with discovered folders from the cloned project.</span>
             </div>
             <input
               placeholder="https://github.com/owner/repo"
               value={newProject.git_url}
-              onChange={(event) => setNewProject((prev) => ({ ...prev, git_url: event.target.value }))}
+              onChange={(event) => {
+                const gitUrl = event.target.value;
+                setNewProject((prev) => ({ ...prev, git_url: gitUrl }));
+                if (!browsePath.trim() || browsePath.trim() === "/srv/apps") {
+                  setBrowsePath(suggestClonePathFromGitUrl(gitUrl));
+                }
+              }}
               required
             />
+            <input
+              placeholder="clone local path (e.g. /srv/apps/my-project)"
+              value={browsePath}
+              onChange={(event) => setBrowsePath(event.target.value)}
+              required
+            />
+            {cloningImport ? (
+              <div className="clone-progress" role="status" aria-live="polite">
+                <div className="clone-progress-bar" />
+                <span>Cloning repository, please wait...</span>
+              </div>
+            ) : null}
             <select
               value={newProject.service_type}
               onChange={(event) => setNewProject((prev) => ({ ...prev, service_type: event.target.value }))}
@@ -181,7 +215,7 @@ export default function NewProjectPage({
               </button>
             </div>
             <div className="wizard-inline-help">
-              <span>Clone first, then browse the cloned folder contents.</span>
+              <span>Cloned project folders are listed below. Use open to dive deeper.</span>
             </div>
             <div className="project-actions" style={{ gridColumn: "1 / -1", gap: 8 }}>
               <input
@@ -192,14 +226,6 @@ export default function NewProjectPage({
               />
               <button
                 type="button"
-                className="auth-btn"
-                disabled={cloningImport || analyzeBusy || newProject.git_url.trim().length < 4 || browsePath.trim().length < 2}
-                onClick={handleCloneIntoPath}
-              >
-                {cloningImport ? "cloning..." : "clone repository"}
-              </button>
-              <button
-                type="button"
                 className="ghost-btn"
                 disabled={loadingImportPaths || cloningImport || browsePath.trim().length < 2}
                 onClick={() => onLoadImportPaths(browsePath)}
@@ -207,12 +233,6 @@ export default function NewProjectPage({
                 open folder
               </button>
             </div>
-            {cloningImport ? (
-              <div className="clone-progress" role="status" aria-live="polite">
-                <div className="clone-progress-bar" />
-                <span>Cloning repository, please wait...</span>
-              </div>
-            ) : null}
             {browsePath.trim() ? (
               <div className="wizard-inline-help">
                 <span>Current folder: {browsePath.trim()}</span>
@@ -349,8 +369,8 @@ export default function NewProjectPage({
             back
           </button>
           {wizardStep < 3 ? (
-            <button type="button" className="ghost-btn" onClick={goNext} disabled={analyzeBusy}>
-              {wizardStep === 1 && analyzeBusy ? "detecting..." : "next"}
+            <button type="button" className="ghost-btn" onClick={goNext} disabled={analyzeBusy || cloningImport}>
+              {wizardStep === 1 && cloningImport ? "cloning..." : wizardStep === 1 && analyzeBusy ? "detecting..." : "next"}
             </button>
           ) : (
             <button type="submit" className="auth-btn" disabled={creatingProject || configErrors.length > 0}>

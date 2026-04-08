@@ -168,13 +168,14 @@ export default function App() {
     }
   }
 
-  async function handleAnalyzeImport() {
+  async function handleAnalyzeImport(localPathOverride = "") {
     try {
       setError("");
       setAnalyzeBusy(true);
+      const resolvedLocalPath = (localPathOverride || newProject.local_path || "").trim();
       const analyzed = await analyzeProjectImport(token, {
         git_url: newProject.git_url.trim() || null,
-        local_path: newProject.local_path.trim() || null,
+        local_path: resolvedLocalPath || null,
         tech_stack: newProject.tech_stack.trim() || null,
         service_type: newProject.service_type,
       });

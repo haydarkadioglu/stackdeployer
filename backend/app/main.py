@@ -9,6 +9,7 @@ from .database import init_db
 from .routers.projects import router as projects_router
 from .routers.system import router as system_router
 from .routers.ws import router as ws_router
+from .routers.analyzer import router as analyzer_router
 
 
 @asynccontextmanager
@@ -30,6 +31,7 @@ app.include_router(auth_router)
 app.include_router(projects_router)
 app.include_router(system_router)
 app.include_router(ws_router)
+app.include_router(analyzer_router)
 
 
 @app.get("/api/v1/health")

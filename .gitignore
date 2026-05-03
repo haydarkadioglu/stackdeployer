@@ -7,10 +7,7 @@ __pycache__/
 *.db
 .venv/
 venv/
-
-#github
-.github/
-
+.pytest_cache/
 
 # Environment
 .env
@@ -19,9 +16,27 @@ venv/
 # Node
 node_modules/
 dist/
+package-lock.json
+
+# Docker
+docker-compose.override.yml
 
 # IDE / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Development
+*.log
+*.tmp
+temp/
+cache/
+
+# Test files
+smoke_test.db
+test_*.db
+
+# Build artifacts
+build/
+target/

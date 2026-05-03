@@ -1,15 +1,59 @@
 # StackDeployer Detailed Setup Guide
 
-This guide expands the short README flow and gives full setup details for production and development environments.
+> **⚠️ DEPRECATED:** This documentation is for the legacy installation method.  
+> **🚀 RECOMMENDED:** Use the [Universal Installer](../README-UNIVERSAL-INSTALLER.md) for cross-platform installation.
 
-For a dedicated DNS/domain mapping walkthrough, see:
-- [DOMAIN_TO_VPS.md](DOMAIN_TO_VPS.md)
+This guide contains historical information about the original setup process. For new installations, please use the universal installer which supports:
+- **Cross-platform:** Linux, macOS, Windows
+- **Multiple methods:** Docker, Native, WSL2
+- **Automatic setup:** Dependencies, configuration, health checks
 
-## 1. Architecture Summary
+## 🚀 Fresh Installation (Recommended)
 
-StackDeployer consists of:
+For new installations, use the universal installer directly:
+
+### One-Command Installation
+
+**Linux/macOS:**
+```bash
+curl -sSL https://raw.githubusercontent.com/haydarkadioglu/stackdeployer/main/install-universal.sh | bash
+```
+
+**Windows:**
+```powershell
+irm https://raw.githubusercontent.com/haydarkadioglu/stackdeployer/main/install.ps1 | iex
+```
+
+### Manual Installation
+
+If you prefer to clone first:
+
+```bash
+# Clone repository
+git clone https://github.com/haydarkadioglu/stackdeployer
+cd stackdeployer
+
+# Run universal installer
+bash install-universal.sh
+```
+
+## 🔄 Migration from Old Installation
+
+For detailed migration instructions, see the **[Migration Guide](MIGRATION.md)**.
+
+Quick summary:
+1. Backup existing installation
+2. Stop old service  
+3. Run universal installer
+4. Restore data if needed
+
+For complete step-by-step instructions, troubleshooting, and rollback procedures, refer to the dedicated migration documentation.
+
+## Legacy Architecture (For Reference)
+
+The original StackDeployer consisted of:
 - FastAPI backend (control plane)
-- React frontend (dashboard)
+- React frontend (dashboard)  
 - Nginx reverse proxy (panel + project routing)
 - PM2 process manager (web and worker services)
 - SQLite database (metadata, logs, settings)
@@ -18,7 +62,9 @@ Default runtime ports:
 - Backend API bind: `127.0.0.1:8001`
 - Frontend dev server (local only): `5173`
 
-## 2. VPS Prerequisites
+## Legacy Prerequisites
+
+> These requirements are automatically handled by the universal installer.
 
 Recommended OS:
 - Ubuntu 22.04+ or Debian 12+

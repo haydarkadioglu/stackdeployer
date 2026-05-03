@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  stackdeployer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    environment:
+      - APP_ENV=${APP_ENV:-development}
+      - DATABASE_URL=postgresql://stackdeployer:password@postgres:5432/stackdeployer
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+      - ALLOWED_PROJECT_ROOTS=/app/projects
+    volumes:
+      - ./projects:/app/projects
+      - ./data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=stackdeployer
+      - POSTGRES_USER=stackdeployer
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stackdeployer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/sites:/etc/nginx/sites-available
+      - ./frontend/dist:/usr/share/nginx/html
+    depends_on:
+      - stackdeployer
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

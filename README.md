@@ -1,215 +1,303 @@
 # StackDeployer
 
-StackDeployer is a self-hosted control plane for deploying multiple projects (FastAPI, Node.js, mixed stacks) on a single VPS.
+StackDeployer is a self-hosted control plane for deploying multiple projects (FastAPI, Node.js, mixed stacks) on a single VPS with **universal cross-platform installation**.
 
 ## Supported Operating Systems
-- Ubuntu 22.04+
-- Debian 12+
-
-Notes:
-- Installer and service wiring are designed for Linux server environments.
-- Windows and macOS are supported for local development only (not production install via install.sh).
+- **Linux:** Ubuntu 22.04+, Debian 12+
+- **macOS:** 10.15+ with Homebrew
+- **Windows:** 10/11 with WSL2 or Docker Desktop
 
 ## Supported Technology Stacks
-- Python services (FastAPI, Django, Flask, generic Python workers)
-- Node.js services (web and worker processes)
-- Mixed-stack deployments managed via PM2 process control
+- **Python:** FastAPI, Django, Flask, generic Python workers
+- **Node.js:** Express, Next.js, React, Vue, generic Node.js apps
+- **Go:** Gin, Echo, Fiber, generic Go services
+- **Java:** Spring Boot, Quarkus, generic Java apps
 
 Service modes:
-- web: HTTP service with optional domain and Nginx mapping
-- worker: background or console process without public route requirement
+- **web:** HTTP service with optional domain and Nginx mapping
+- **worker:** Background or console process without public route requirement
 
-For full production and operations details, see:
-- [docs/DETAILED_SETUP.md](docs/DETAILED_SETUP.md)
+## 🚀 Quick Start
 
-## Start Here: Import, Run, and Publish
+### Universal Installation (Recommended)
 
-### 1. Import the repository
-1. Create an empty repository in your Git provider.
-2. Push this project to that repository, or clone directly if already hosted.
-3. On your VPS (or local machine for development), clone it:
+**Linux/macOS:**
+```bash
+curl -sSL https://raw.githubusercontent.com/haydarkadioglu/stackdeployer/main/install-universal.sh | bash
+```
 
+**Windows:**
+```powershell
+irm https://raw.githubusercontent.com/haydarkadioglu/stackdeployer/main/install.ps1 | iex
+```
+
+**Docker:**
 ```bash
 git clone https://github.com/haydarkadioglu/stackdeployer
 cd stackdeployer
+docker-compose up -d
 ```
 
-### 2. Bring up StackDeployer on a VPS (recommended)
-1. Use Ubuntu or Debian with a sudo-enabled user.
-2. Run installer from project root (`PANEL_SERVER_NAME` can be your domain or subdomain):
+### Post-Installation Setup
 
+1. **Bootstrap Admin User:**
 ```bash
-sudo PANEL_SERVER_NAME=panel.example.com CERTBOT_EMAIL=admin@example.com bash install.sh
-```
-
-3. Check service health:
-
-```bash
-sudo systemctl status stackdeployer
-curl http://127.0.0.1:8001/api/v1/health
-```
-
-### 3. Bootstrap first admin
-Run once after first install:
-
-```bash
-curl -X POST http://127.0.0.1:8001/api/v1/auth/bootstrap \
+curl -X POST http://localhost:8001/api/v1/auth/bootstrap \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"CHANGE_ME_STRONG_PASSWORD"}'
+  -d '{"username":"admin","password":"YOUR_STRONG_PASSWORD"}'
 ```
 
-### 4. Login and get API token
-Use this token for project operations (deploy, restart, domain mapping):
+2. **Access Dashboard:**
+- URL: `http://localhost:8001`
+- Login with admin credentials
 
+3. **Verify Health:**
 ```bash
-curl -X POST http://127.0.0.1:8001/api/v1/auth/login \
+curl http://localhost:8001/api/v1/health
+```
+
+## 🎯 Features
+
+### Smart Tech Stack Detection
+- **Automatic Analysis:** Detects Python, Node.js, Go, Java projects from Git repositories
+- **Intelligent Suggestions:** Suggests build commands, start commands, and configurations
+- **Framework Support:** Recognizes Django, FastAPI, Flask, Express, Next.js, Spring Boot, etc.
+
+### Cross-Platform Installation
+- **Universal Installer:** One command works on Linux, macOS, and Windows
+- **Docker Support:** Containerized deployment with Docker Compose
+- **Development Mode:** Quick setup for local development
+
+### Advanced Deployment Management
+- **Project Analytics:** Real-time monitoring and logging
+- **Domain Management:** Automatic Nginx configuration and SSL setup
+- **Process Control:** PM2 integration for process lifecycle management
+
+## 📋 API Documentation
+
+### Tech Stack Analysis
+```bash
+# Analyze a repository
+curl -X POST http://localhost:8001/api/v1/analyzer/analyze \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"CHANGE_ME_STRONG_PASSWORD"}'
+  -d '{"git_url":"https://github.com/your-repo"}'
+
+# Get supported tech stacks
+curl http://localhost:8001/api/v1/analyzer/tech-stacks
+
+# Validate project configuration
+curl "http://localhost:8001/api/v1/analyzer/validate-project?git_url=...&tech_stack=..."
 ```
 
-### 5. Configure custom domain or subdomain
-1. In DNS, create an `A` record that points to your VPS IP.
-   - Example root domain: `example.com -> <VPS_IP>`
-   - Example subdomain: `app.example.com -> <VPS_IP>`
-2. Create your project in StackDeployer (API or UI).
-3. Apply Nginx route for that project:
+### Project Management
+```bash
+# Create project with auto-detected configuration
+curl -X POST http://localhost:8001/api/v1/projects \
+  -H "Authorization: Bearer <TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-app",
+    "git_url": "https://github.com/user/repo",
+    "tech_stack": "python_fastapi",
+    "service_type": "web",
+    "internal_port": 8000
+  }'
+```
+
+## 🔧 Configuration
+
+### Environment Variables
+```bash
+# Production
+APP_ENV=production
+DATABASE_URL=postgresql://user:pass@localhost:5432/stackdeployer
+JWT_SECRET=your-very-secure-secret
+CORS_ORIGINS=https://yourdomain.com
+
+# Development
+APP_ENV=development
+DATABASE_URL=sqlite:///./stackdeployer.db
+JWT_SECRET=dev-secret-change-in-production
+```
+
+### Docker Configuration
+```yaml
+# docker-compose.yml override example
+version: '3.8'
+services:
+  stackdeployer:
+    environment:
+      - APP_ENV=production
+      - JWT_SECRET=your-custom-secret
+    ports:
+      - "8001:8001"
+```
+
+## 🌐 Domain & SSL Setup
+
+### Custom Domain Configuration
+1. **DNS Setup:** Create `A` record pointing to your VPS IP
+2. **Project Creation:** Add project in StackDeployer dashboard
+3. **Nginx Configuration:** Apply domain mapping via API or UI
 
 ```bash
-curl -X POST http://127.0.0.1:8001/api/v1/projects/<PROJECT_ID>/nginx/apply \
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+curl -X POST http://localhost:8001/api/v1/projects/<PROJECT_ID>/nginx/apply \
+  -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
   -d '{"site_name":"myapp","domain":"app.example.com"}'
 ```
 
-4. Verify route is active:
-
+### SSL Certificate Setup
 ```bash
-curl -I http://app.example.com
-```
-
-### 6. Enable SSL for domain/subdomain (Certbot)
-After DNS propagation and successful HTTP routing:
-
-```bash
+# Automatic SSL via Certbot
 sudo certbot --nginx -d app.example.com
-```
 
-For root + www:
-
-```bash
-sudo certbot --nginx -d example.com -d www.example.com
-```
-
-You can also trigger SSL from StackDeployer API:
-
-```bash
-curl -X POST http://127.0.0.1:8001/api/v1/projects/<PROJECT_ID>/ssl/issue \
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \
+# Or via StackDeployer API
+curl -X POST http://localhost:8001/api/v1/projects/<PROJECT_ID>/ssl/issue \
+  -H "Authorization: Bearer <TOKEN>" \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","extra_domains":["www.example.com"]}'
-```
+  -d '{"email":"admin@example.com"}'
+## 🛠️ Development
 
-Renew all certificates (optional dry-run):
-
+### Local Development Setup
 ```bash
-curl -X POST http://127.0.0.1:8001/api/v1/projects/ssl/renew \
-  -H "Authorization: Bearer <ACCESS_TOKEN>" \
-  -H "Content-Type: application/json" \
-  -d '{"dry_run":true}'
+# Clone repository
+git clone https://github.com/haydarkadioglu/stackdeployer
+cd stackdeployer
+
+# Backend setup
+cd backend
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# Create environment file
+echo "app_env=development" > .env
+
+# Run migrations
+alembic upgrade head
+
+# Start backend
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
+
+# Frontend setup (new terminal)
+cd frontend
+npm install
+npm run dev
 ```
 
-### 7. Optional local development flow
-Run backend and frontend manually if you are not using the VPS installer.
+### Docker Development
+```bash
+# Development with hot reload
+docker-compose up
 
-## Ready-to-Run Checklist
-1. Run migrations: `alembic upgrade head` inside `backend/`.
-2. Bootstrap first admin with `/api/v1/auth/bootstrap`.
-3. Login and verify `/api/v1/auth/me` works with your token.
-4. Create a `web` or `worker` project from dashboard form or API.
-5. For `web` projects, set `internal_port` and apply Nginx mapping.
+# Production build
+docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+```
 
-## Service Types
-- `web`: requires `internal_port`, supports domain and Nginx mapping.
-- `worker`: port/domain optional, managed via PM2 as background/console service.
+## 📚 Documentation
 
-## Current Backend Capabilities
-- Project CRUD API
-- Service types: `web` and `worker` (console/background processes)
-- JWT auth (`bootstrap`, `login`, `me`)
-- Deployment executor (git, install, build, PM2 lifecycle)
-- Nginx site automation (apply/remove with validation)
-- Realtime log stream via WebSocket
-- Alembic migration baseline
+- **[Universal Installer Guide](README-UNIVERSAL-INSTALLER.md)** - Complete installation instructions
+- **[API Documentation](http://localhost:8001/docs)** - Interactive API docs (after installation)
+- **[Cleanup Report](CLEANUP.md)** - Recent changes and removed files
 
-## Quick Start (Development)
-1. Create a Python virtual environment in `backend/`.
-2. Install dependencies from `backend/requirements.txt`.
-3. Copy `backend/.env.example` to `backend/.env` and set `jwt_secret`.
-4. Run migrations from `backend/`: `alembic upgrade head`.
-5. Start API from `backend/`: `uvicorn app.main:app --reload`.
+## 🔍 Troubleshooting
 
-## Testing
-Run backend smoke tests with pytest:
+### Common Issues
 
+**Installation fails on Windows:**
+```powershell
+# Use Docker method
+docker-compose up -d
+
+# Or install WSL2 first
+wsl --install
+```
+
+**Port conflicts:**
+```bash
+# Change port
+APP_PORT=8002 bash install-universal.sh
+
+# Or check what's using the port
+netstat -tulpn | grep :8001
+```
+
+**Backend won't start:**
+```bash
+# Check environment variables
+cat backend/.env
+
+# Check logs
+docker-compose logs stackdeployer
+```
+
+## 🤝 Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🔗 Links
+
+- **Repository:** https://github.com/haydarkadioglu/stackdeployer
+- **Issues:** https://github.com/haydarkadioglu/stackdeployer/issues
+- **Discussions:** https://github.com/haydarkadioglu/stackdeployer/discussions
+
+## 🚀 Current Capabilities
+
+### Backend Features
+- **Project CRUD API** - Complete project lifecycle management
+- **Tech Stack Detection** - Automatic analysis and configuration suggestions
+- **Service Types** - `web` and `worker` process management
+- **JWT Authentication** - Secure user authentication and authorization
+- **Deployment Executor** - Git cloning, building, and PM2 lifecycle management
+- **Nginx Automation** - Dynamic site configuration with validation
+- **Realtime Logging** - WebSocket-based log streaming
+- **SSL Management** - Automated certificate handling via Certbot
+- **Database Migrations** - Alembic-based schema management
+
+### Frontend Features
+- **Modern React Dashboard** - Intuitive project management interface
+- **Real-time Updates** - Live status monitoring and logs
+- **Project Wizard** - Step-by-step project creation with auto-detection
+- **Domain Management** - Easy domain and SSL configuration
+- **Responsive Design** - Works on desktop and mobile devices
+
+## 🧪 Testing
+
+### Backend Tests
 ```bash
 cd backend
 python -m pytest -q
 ```
 
-## Frontend (Dashboard)
-1. Change directory to `frontend/`.
-2. Install dependencies: `npm install`.
-3. Run development server: `npm run dev`.
-4. Open the local Vite URL shown in terminal.
-
-Notes:
-- By default, frontend calls `http://127.0.0.1:8001` in local dev (`:5173`).
-- In deployed mode, frontend uses same-origin API path (`/api/...`) via Nginx.
-- You can override with `VITE_API_BASE_URL`.
-
-## VPS Installation (Ubuntu/Debian)
-Run:
-
+### Integration Tests
 ```bash
-sudo bash install.sh
-```
-
-The installer will:
-- Check/install Python 3.10+, Node.js 18+, Nginx, Certbot, PM2
-- Copy backend files to `/opt/stackdeployer/backend`
-- Copy frontend files to `/opt/stackdeployer/frontend`
-- Create venv and install dependencies
-- Create backend `.env` with generated JWT secret
-- Run `alembic upgrade head`
-- Build frontend (`npm install && npm run build`)
-- Create and start `stackdeployer.service` (systemd)
-- Configure Nginx panel site and reload Nginx
-
-## Security Notes
-- Keep backend bound to `127.0.0.1` and expose only via Nginx.
-- Complete admin bootstrap immediately after installation.
-- Replace any weak/default secrets before production traffic.
-- Set a dedicated `secret_encryption_key` in `backend/.env` so encrypted environment variables remain readable across restarts.
-- Login endpoint includes temporary lockout after repeated failed attempts.
-- Project `local_path` must stay under `allowed_project_roots` (`backend/.env`) and path traversal (`..`) is rejected.
-- Canonical path checks are applied so symlink-resolved paths that escape allowed roots are blocked.
-- Project environment variables are stored encrypted when marked secret and are rendered into the deployment `.env` file at deploy time.
-
-## Panel Self Update (Git Pull)
-- You can trigger panel self-update from dashboard: `General Settings -> run self update`.
-- The backend executes `git fetch`, `git checkout <branch>`, `git pull --ff-only` on configured repo root.
-- Optional steps can install backend dependencies, run migrations, and rebuild frontend.
-- Configure in `backend/.env`:
-  - `self_update_enabled=true`
-  - `self_update_repo_root=/opt/stackdeployer`
-  - `self_update_default_branch=main`
-  - `self_update_service_name=stackdeployer`
-- After update, restart backend service if runtime code changed:
-  - `sudo systemctl restart stackdeployer`
-
-## Initial Admin Bootstrap Example
-```bash
-curl -X POST http://127.0.0.1:8001/api/v1/auth/bootstrap \
+# Test tech stack detection
+curl -X POST http://localhost:8001/api/v1/analyzer/analyze \
   -H "Content-Type: application/json" \
-  -d '{"username":"admin","password":"CHANGE_ME_STRONG_PASSWORD"}'
+  -d '{"git_url":"https://github.com/django/django"}'
+
+# Test API health
+curl http://localhost:8001/api/v1/health
 ```
+
+## 📖 Additional Documentation
+
+For detailed setup, configuration, and troubleshooting information:
+- **[Universal Installer Guide](README-UNIVERSAL-INSTALLER.md)** - Complete installation instructions
+- **[Migration Guide](docs/MIGRATION.md)** - Upgrade from legacy installations
+- **[API Documentation](http://localhost:8001/docs)** - Interactive API docs (after installation)
+- **[Cleanup Report](CLEANUP.md)** - Recent changes and removed files
+- **[Legacy Setup](docs/DETAILED_SETUP.md)** - Historical installation documentation (deprecated)
+
+---
+
+**StackDeployer** - Simplify your deployment workflow with intelligent project management and cross-platform installation.

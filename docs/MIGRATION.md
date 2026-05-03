@@ -34,7 +34,12 @@ This prevents conflicts during the new installation.
 Install the new version using the universal installer:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/haydarkadioglu/stackdeployer/main/install-universal.sh | bash
+# Clone the repository (or use existing clone)
+git clone https://github.com/haydarkadioglu/stackdeployer /tmp/stackdeployer
+cd /tmp/stackdeployer
+
+# Run universal installer
+bash install-universal.sh
 ```
 
 The universal installer will:

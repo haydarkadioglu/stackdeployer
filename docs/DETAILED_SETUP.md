@@ -10,24 +10,11 @@ This guide contains historical information about the original setup process. For
 
 ## 🚀 Fresh Installation (Recommended)
 
-For new installations, use the universal installer directly:
+For new installations, use the universal installer:
 
-### One-Command Installation
+### Quick Installation
 
 **Linux/macOS:**
-```bash
-curl -sSL https://raw.githubusercontent.com/haydarkadioglu/stackdeployer/main/install-universal.sh | bash
-```
-
-**Windows:**
-```powershell
-irm https://raw.githubusercontent.com/haydarkadioglu/stackdeployer/main/install.ps1 | iex
-```
-
-### Manual Installation
-
-If you prefer to clone first:
-
 ```bash
 # Clone repository
 git clone https://github.com/haydarkadioglu/stackdeployer
@@ -35,6 +22,16 @@ cd stackdeployer
 
 # Run universal installer
 bash install-universal.sh
+```
+
+**Windows:**
+```powershell
+# Clone repository
+git clone https://github.com/haydarkadioglu/stackdeployer
+cd stackdeployer
+
+# Run universal installer
+.\install.ps1
 ```
 
 ## 🔄 Migration from Old Installation

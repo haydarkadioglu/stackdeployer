@@ -23,12 +23,22 @@ Service modes:
 
 **Linux/macOS:**
 ```bash
-curl -sSL https://raw.githubusercontent.com/haydarkadioglu/stackdeployer/main/install-universal.sh | bash
+# Clone repository
+git clone https://github.com/haydarkadioglu/stackdeployer
+cd stackdeployer
+
+# Run universal installer
+bash install-universal.sh
 ```
 
 **Windows:**
 ```powershell
-irm https://raw.githubusercontent.com/haydarkadioglu/stackdeployer/main/install.ps1 | iex
+# Clone repository
+git clone https://github.com/haydarkadioglu/stackdeployer
+cd stackdeployer
+
+# Run universal installer
+.\install.ps1
 ```
 
 **Docker:**

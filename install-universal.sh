@@ -85,18 +85,135 @@ check_native_deps() {
     esac
 }
 
-check_linux_deps() {
-    local missing=()
+install_nodejs_linux() {
+    log "Installing Node.js..."
     
-    command_exists python3 || missing+=("python3")
-    command_exists node || missing+=("node")
-    command_exists npm || missing+=("npm")
-    command_exists git || missing+=("git")
+    # Check if we have sudo access
+    local has_sudo=false
+    if command_exists sudo && sudo -n true 2>/dev/null; then
+        has_sudo=true
+    fi
     
-    if [[ ${#missing[@]} -gt 0 ]]; then
-        error "Missing dependencies: ${missing[*]}"
+    if command_exists apt; then
+        # Ubuntu/Debian - Use NodeSource for latest Node.js
+        log "Setting up NodeSource repository..."
+        
+        if [[ "$has_sudo" == true ]]; then
+            sudo apt-get update
+            sudo apt-get install -y curl ca-certificates gnupg
+            
+            # Add NodeSource GPG key
+            sudo mkdir -p /etc/apt/keyrings
+            curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | sudo gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+            
+            # Add NodeSource repository
+            NODE_MAJOR=20
+            echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
+            
+            # Install Node.js
+            sudo apt-get update
+            sudo apt-get install -y nodejs
+        else
+            error "Root privileges required to install Node.js"
+            error "Please run: sudo apt-get update && sudo apt-get install -y nodejs npm"
+            return 1
+        fi
+        
+    elif command_exists yum; then
+        # RHEL/CentOS
+        if [[ "$has_sudo" == true ]]; then
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+            sudo yum install -y nodejs
+        else
+            error "Root privileges required to install Node.js"
+            return 1
+        fi
+    elif command_exists dnf; then
+        # Fedora/RHEL 8+
+        if [[ "$has_sudo" == true ]]; then
+            curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+            sudo dnf install -y nodejs
+        else
+            error "Root privileges required to install Node.js"
+            return 1
+        fi
+    elif command_exists pacman; then
+        # Arch Linux
+        if [[ "$has_sudo" == true ]]; then
+            sudo pacman -Sy --noconfirm nodejs npm
+        else
+            error "Root privileges required to install Node.js"
+            return 1
+        fi
+    else
+        error "Cannot install Node.js automatically"
         return 1
     fi
+}
+
+check_linux_deps() {
+    local missing=()
+    local need_node=false
+    
+    # Check if we have sudo access
+    local has_sudo=false
+    if command_exists sudo && sudo -n true 2>/dev/null; then
+        has_sudo=true
+    fi
+    
+    command_exists python3 || missing+=("python3")
+    command_exists git || missing+=("git")
+    
+    # Check for node/npm separately (needs special handling)
+    if ! command_exists node || ! command_exists npm; then
+        need_node=true
+    fi
+    
+    # Install basic dependencies first
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log "Installing missing dependencies: ${missing[*]}"
+        
+        if [[ "$has_sudo" == false ]]; then
+            error "Root privileges required to install dependencies"
+            error "Please run with sudo, or install manually:"
+            error "  sudo apt-get update && sudo apt-get install -y ${missing[*]}"
+            return 1
+        fi
+        
+        if command_exists apt; then
+            sudo apt-get update
+            sudo apt-get install -y "${missing[@]}"
+        elif command_exists yum; then
+            sudo yum install -y "${missing[@]}"
+        elif command_exists dnf; then
+            sudo dnf install -y "${missing[@]}"
+        elif command_exists pacman; then
+            sudo pacman -Sy --noconfirm "${missing[@]}"
+        else
+            error "Cannot install dependencies automatically."
+            error "Please install manually: ${missing[*]}"
+            return 1
+        fi
+    fi
+    
+    # Install Node.js separately (special handling)
+    if [[ "$need_node" == true ]]; then
+        install_nodejs_linux || return 1
+    fi
+    
+    # Final verification
+    local still_missing=()
+    command_exists python3 || still_missing+=("python3")
+    command_exists node || still_missing+=("nodejs")
+    command_exists npm || still_missing+=("npm")
+    command_exists git || still_missing+=("git")
+    
+    if [[ ${#still_missing[@]} -gt 0 ]]; then
+        error "Failed to install: ${still_missing[*]}"
+        return 1
+    fi
+    
+    success "All dependencies installed successfully"
     return 0
 }
 

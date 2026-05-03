@@ -19,7 +19,7 @@ Service modes:
 
 ## 🚀 Quick Start
 
-### Universal Installation (Recommended)
+### Interactive Installation (Recommended)
 
 **Linux/macOS:**
 ```bash
@@ -27,7 +27,7 @@ Service modes:
 git clone https://github.com/haydarkadioglu/stackdeployer
 cd stackdeployer
 
-# Run universal installer
+# Run interactive installer (asks all settings at once)
 bash install-universal.sh
 ```
 
@@ -37,11 +37,28 @@ bash install-universal.sh
 git clone https://github.com/haydarkadioglu/stackdeployer
 cd stackdeployer
 
-# Run universal installer
+# Run interactive installer
 .\install.ps1
 ```
 
-**Docker:**
+### Automated Installation (Non-Interactive)
+
+For automated deployments or CI/CD:
+
+```bash
+# Clone repository
+git clone https://github.com/haydarkadioglu/stackdeployer
+cd stackdeployer
+
+# Non-interactive installation with defaults
+bash install-universal.sh --non-interactive
+
+# Or with custom settings
+bash install-universal.sh --non-interactive --port 8080 --domain panel.example.com
+```
+
+### Docker Installation
+
 ```bash
 git clone https://github.com/haydarkadioglu/stackdeployer
 cd stackdeployer

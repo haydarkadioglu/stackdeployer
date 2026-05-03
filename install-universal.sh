@@ -18,6 +18,65 @@ INSTALL_DIR="${INSTALL_DIR:-/opt/stackdeployer}"
 SERVICE_NAME="stackdeployer"
 APP_PORT="${APP_PORT:-8001}"
 USE_DOCKER="${USE_DOCKER:-auto}"
+INTERACTIVE="${INTERACTIVE:-true}"
+
+# Parse command line arguments
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --non-interactive|-n)
+                INTERACTIVE="false"
+                shift
+                ;;
+            --port|-p)
+                APP_PORT="$2"
+                shift 2
+                ;;
+            --domain|-d)
+                PANEL_DOMAIN="$2"
+                shift 2
+                ;;
+            --env|-e)
+                APP_ENV="$2"
+                shift 2
+                ;;
+            --help|-h)
+                show_help
+                exit 0
+                ;;
+            *)
+                warning "Unknown option: $1"
+                shift
+                ;;
+        esac
+    done
+}
+
+show_help() {
+    cat <<EOF
+StackDeployer Universal Installer
+
+Usage: bash install-universal.sh [OPTIONS]
+
+Options:
+    -n, --non-interactive    Run in non-interactive mode (uses defaults)
+    -p, --port PORT          Set application port (default: 8001)
+    -d, --domain DOMAIN      Set panel domain
+    -e, --env ENV            Set environment (production/development)
+    -h, --help               Show this help message
+
+Examples:
+    # Interactive installation (default)
+    bash install-universal.sh
+
+    # Non-interactive installation
+    bash install-universal.sh --non-interactive
+
+    # Custom port
+    bash install-universal.sh --port 8080
+
+EOF
+}
 
 # Logging functions
 log() {
@@ -86,7 +145,7 @@ check_native_deps() {
 }
 
 install_nodejs_linux() {
-    log "Installing Node.js..."
+    log "Installing Node.js and npm..."
     
     # Check if we have sudo access
     local has_sudo=false
@@ -110,9 +169,15 @@ install_nodejs_linux() {
             NODE_MAJOR=20
             echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_$NODE_MAJOR.x nodistro main" | sudo tee /etc/apt/sources.list.d/nodesource.list
             
-            # Install Node.js
+            # Install Node.js and npm
             sudo apt-get update
             sudo apt-get install -y nodejs
+            
+            # Ensure npm is installed (sometimes separate package)
+            if ! command_exists npm; then
+                log "Installing npm separately..."
+                sudo apt-get install -y npm
+            fi
         else
             error "Root privileges required to install Node.js"
             error "Please run: sudo apt-get update && sudo apt-get install -y nodejs npm"
@@ -147,6 +212,15 @@ install_nodejs_linux() {
         fi
     else
         error "Cannot install Node.js automatically"
+        return 1
+    fi
+    
+    # Verify installation
+    if command_exists node && command_exists npm; then
+        success "Node.js $(node --version) and npm $(npm --version) installed"
+        return 0
+    else
+        error "Node.js or npm installation failed"
         return 1
     fi
 }
@@ -348,23 +422,138 @@ generate_secret() {
     fi
 }
 
+# Interactive setup wizard
+collect_config() {
+    # Non-interactive mode: use defaults
+    if [[ "$INTERACTIVE" == "false" ]]; then
+        log "Non-interactive mode: using default configuration"
+        
+        # Set defaults
+        APP_ENV="${APP_ENV:-production}"
+        JWT_SECRET="${JWT_SECRET:-$(generate_secret)}"
+        ADMIN_PASSWORD="${ADMIN_PASSWORD:-admin123}"
+        PANEL_DOMAIN="${PANEL_DOMAIN:-}"
+        ALLOWED_ROOTS="${ALLOWED_ROOTS:-/srv/apps,/opt/apps,/home/$(whoami)/apps}"
+        
+        # Set CORS origins based on domain
+        if [[ -n "$PANEL_DOMAIN" ]]; then
+            CORS_ORIGINS="http://localhost:${APP_PORT},http://127.0.0.1:${APP_PORT},http://${PANEL_DOMAIN},https://${PANEL_DOMAIN}"
+        else
+            CORS_ORIGINS="http://localhost:${APP_PORT},http://127.0.0.1:${APP_PORT}"
+        fi
+        
+        log "Configuration:"
+        log "  Environment: $APP_ENV"
+        log "  Port: $APP_PORT"
+        log "  Domain: ${PANEL_DOMAIN:-localhost}"
+        return 0
+    fi
+    
+    # Interactive mode: ask user for configuration
+    log "Starting interactive setup..."
+    
+    echo ""
+    echo "=========================================="
+    echo "     StackDeployer Setup Wizard"
+    echo "=========================================="
+    echo ""
+    
+    # App Environment
+    echo "1. Environment Setup"
+    echo "   [1] Production (recommended)"
+    echo "   [2] Development"
+    read -p "   Select (1-2) [1]: " env_choice
+    case ${env_choice:-1} in
+        2) APP_ENV="development" ;;
+        *) APP_ENV="production" ;;
+    esac
+    echo ""
+    
+    # JWT Secret
+    echo "2. Security Configuration"
+    echo "   JWT Secret (leave empty for auto-generated):"
+    read -s -p "   Secret: " jwt_input
+    echo ""
+    if [[ -z "$jwt_input" ]]; then
+        JWT_SECRET=$(generate_secret)
+        echo "   ✓ Auto-generated secret"
+    else
+        JWT_SECRET="$jwt_input"
+    fi
+    echo ""
+    
+    # Admin Password
+    echo "3. Admin User Setup"
+    echo "   Admin Password (leave empty for 'admin123'):"
+    read -s -p "   Password: " admin_pass
+    echo ""
+    if [[ -z "$admin_pass" ]]; then
+        ADMIN_PASSWORD="admin123"
+        warning "Using default password: admin123 (change this!)"
+    else
+        ADMIN_PASSWORD="$admin_pass"
+    fi
+    echo ""
+    
+    # Domain/Port
+    echo "4. Network Configuration"
+    read -p "   Port [${APP_PORT}]: " port_input
+    APP_PORT="${port_input:-$APP_PORT}"
+    
+    read -p "   Domain (leave empty for localhost): " domain_input
+    if [[ -n "$domain_input" ]]; then
+        CORS_ORIGINS="http://localhost:${APP_PORT},http://127.0.0.1:${APP_PORT},http://${domain_input},https://${domain_input}"
+        PANEL_DOMAIN="$domain_input"
+    else
+        CORS_ORIGINS="http://localhost:${APP_PORT},http://127.0.0.1:${APP_PORT}"
+        PANEL_DOMAIN=""
+    fi
+    echo ""
+    
+    # Project Roots
+    echo "5. Project Directories"
+    read -p "   Allowed project roots [/srv/apps,/opt/apps]: " roots_input
+    ALLOWED_ROOTS="${roots_input:-/srv/apps,/opt/apps}"
+    echo ""
+    
+    # Summary
+    echo "=========================================="
+    echo "     Configuration Summary"
+    echo "=========================================="
+    echo "   Environment: $APP_ENV"
+    echo "   Port: $APP_PORT"
+    echo "   Domain: ${PANEL_DOMAIN:-localhost}"
+    echo "   Project Roots: $ALLOWED_ROOTS"
+    echo ""
+    read -p "   Proceed with installation? (Y/n): " confirm
+    if [[ "${confirm:-Y}" =~ ^[Nn]$ ]]; then
+        error "Installation cancelled"
+        exit 1
+    fi
+    echo ""
+}
+
 # Create environment file
 create_env_file() {
     local backend_dir="$1"
     local env_file="$backend_dir/.env"
     
-    if [[ ! -f "$env_file" ]]; then
-        log "Creating environment file..."
-        cat > "$env_file" <<EOF
-app_env=production
+    # Collect configuration interactively
+    collect_config
+    
+    log "Creating environment file..."
+    cat > "$env_file" <<EOF
+app_env=${APP_ENV}
 database_url=sqlite:///${backend_dir}/stackdeployer.db
-jwt_secret=$(generate_secret)
+jwt_secret=${JWT_SECRET}
 jwt_algorithm=HS256
 jwt_access_token_expire_minutes=60
-cors_origins=http://localhost:3000,http://127.0.0.1:3000
-allowed_project_roots=/srv/apps,/opt/apps,/home/ubuntu/apps
+cors_origins=${CORS_ORIGINS}
+allowed_project_roots=${ALLOWED_ROOTS}
+panel_domain=${PANEL_DOMAIN}
 EOF
-    fi
+    
+    success "Environment file created"
 }
 
 # Health check
@@ -391,32 +580,54 @@ health_check() {
 
 # Show post-installation info
 show_post_install() {
+    local admin_creds=""
+    if [[ -n "${ADMIN_PASSWORD:-}" ]]; then
+        admin_creds="   curl -X POST http://localhost:${APP_PORT}/api/v1/auth/bootstrap \\
+     -H \"Content-Type: application/json\" \\
+     -d '{\"username\":\"admin\",\"password\":\"${ADMIN_PASSWORD}\"}'
+"
+    else
+        admin_creds="   curl -X POST http://localhost:${APP_PORT}/api/v1/auth/bootstrap \\
+     -H \"Content-Type: application/json\" \\
+     -d '{\"username\":\"admin\",\"password\":\"YOUR_STRONG_PASSWORD\"}'
+"
+    fi
+    
     cat <<EOF
 
-${GREEN}Installation Complete!${NC}
+========================================
+${GREEN}   Installation Complete!${NC}
+========================================
 
-${BLUE}Next Steps:${NC}
+${BLUE}Configuration:${NC}
+   Environment: ${APP_ENV:-production}
+   Port: ${APP_PORT}
+   Domain: ${PANEL_DOMAIN:-localhost}
+   URL: http://localhost:${APP_PORT}
+
+${BLUE}Admin Setup:${NC}
 1. Bootstrap admin user:
-   curl -X POST http://localhost:${APP_PORT}/api/v1/auth/bootstrap \\
-     -H "Content-Type: application/json" \\
-     -d '{"username":"admin","password":"YOUR_STRONG_PASSWORD"}'
-
+${admin_creds}
 2. Access the panel:
    http://localhost:${APP_PORT}
 
-3. Check service status:
+${BLUE}Service Status:${NC}
    ${USE_DOCKER:+docker-compose ps}
-   ${USE_DOCKER:+docker-compose logs stackdeployer}
+   ${USE_DOCKER:+docker-compose logs -f stackdeployer}
+   ${USE_DOCKER:-sudo systemctl status stackdeployer}
 
 ${BLUE}Documentation:${NC}
-- https://github.com/haydarkadioglu/stackdeployer
-- Check README.md for detailed usage
-
+   https://github.com/haydarkadioglu/stackdeployer
+   
+========================================
 EOF
 }
 
 # Main installation flow
 main() {
+    # Parse command line arguments first
+    parse_args "$@"
+    
     log "Starting ${APP_NAME} v${APP_VERSION} installation..."
     log "Platform: $(detect_platform)"
     
